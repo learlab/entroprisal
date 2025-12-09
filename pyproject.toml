@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "entroprisal"
+version = "0.1.0"
+description = "Calculate entropy-based linguistic metrics on text using reference corpora"
+readme = {file = "README.md", content-type = "text/markdown"}
+requires-python = ">=3.9"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Langdon Holmes"},
+]
+keywords = ["entropy", "nlp", "linguistics", "text-analysis", "surprisal"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Text Processing :: Linguistic",
+]
+
+dependencies = [
+    "polars>=0.19.0",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "tqdm>=4.65.0",
+]
+
+[project.optional-dependencies]
+hf = ["huggingface-hub>=0.20.0"]
+spacy = ["spacy>=3.5.0"]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "ipykernel>=6.0.0",
+    "build>=0.10.0",
+    "twine>=4.0.0",
+]
+all = ["entroprisal[hf,spacy]"]
+
+[project.urls]
+Homepage = "https://github.com/learlab/entroprisal"
+Repository = "https://github.com/learlab/entroprisal"
+
+[tool.hatchling.build.targets.wheel]
+packages = ["src/entroprisal"]
+
+[tool.hatchling.build]
+include = [
+    "src/entroprisal/**/*.py",
+    "data/google-books-dictionary-words.txt",
+]
+
+[tool.black]
+line-length = 100
+target-version = ['py39']
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
