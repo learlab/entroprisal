@@ -1,4 +1,5 @@
-data/
+# Large data files (only top-level data directory)
+/data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

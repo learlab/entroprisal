@@ -21,7 +21,7 @@ Example usage:
     >>> metrics = char_calc.calculate_metrics("The cat sat on the mat")
 """
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 from .character_entroprisal import CharacterEntropisalCalculator
 from .rest_of_word_entroprisal import RestOfWordEntropisalCalculator

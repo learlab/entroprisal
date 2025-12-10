@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "entroprisal"
-version = "0.2.1"
+version = "0.2.2"
 description = "Calculate entropy-based linguistic metrics on text using reference corpora"
 readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.9"
@@ -50,13 +50,12 @@ all = ["entroprisal[hf,spacy]"]
 Homepage = "https://github.com/learlab/entroprisal"
 Repository = "https://github.com/learlab/entroprisal"
 
-[tool.hatchling.build.targets.wheel]
+[tool.hatch.build.targets.wheel]
 packages = ["src/entroprisal"]
 
-[tool.hatchling.build]
+[tool.hatch.build]
 include = [
-    "src/entroprisal/**/*.py",
-    "src/entroprisal/data/*.txt",
+    "src/entroprisal/**",
 ]
 
 [tool.black]
