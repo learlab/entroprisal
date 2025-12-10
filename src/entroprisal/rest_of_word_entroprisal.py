@@ -148,15 +148,12 @@ class RestOfWordEntropisalCalculator:
         self.rl_c2_surprisal_lookup = construct_surprisal_lookup(self.rl_c2)
         self.rl_c3_surprisal_lookup = construct_surprisal_lookup(self.rl_c3)
 
-    def calculate_metrics(self, text: str) -> Dict[str, float]:
-        """Calculate bidirectional rest-of-word entropy and surprisal metrics for text.
-
-        Note:
-            For consistent preprocessing, use `preprocess_text()` from
-            `entroprisal.utils` before calling this method.
+    def calculate_metrics(self, tokens: List[str]) -> Dict[str, float]:
+        """Calculate bidirectional rest-of-word entropy and surprisal metrics for a token list.
 
         Args:
-            text: Input text string (should be lowercase, letters and spaces only)
+            tokens: List of token strings (as returned by `preprocess_text()`).
+                Tokens should be lowercase alphabetic strings.
 
         Returns:
             Dictionary with metrics:
@@ -174,8 +171,14 @@ class RestOfWordEntropisalCalculator:
                 - rl_c3_entropy: Right-to-left entropy (3 char context)
                 - rl_c3_surprisal: Right-to-left surprisal (3 char context)
                 - Support counts for each metric
+
+        Example:
+            >>> from entroprisal import preprocess_text, RestOfWordEntropisalCalculator
+            >>> tokens = preprocess_text("The quick brown fox")[0]
+            >>> calc = RestOfWordEntropisalCalculator(words_df)
+            >>> metrics = calc.calculate_metrics(tokens)
         """
-        words = text.lower().split()
+        words = [token.lower() for token in tokens]
 
         lr_c1_entropies = []
         lr_c1_surprisals = []
@@ -309,20 +312,23 @@ class RestOfWordEntropisalCalculator:
 
         return metrics
 
-    def calculate_batch(self, texts: List[str]) -> pd.DataFrame:
-        """Calculate bidirectional rest-of-word metrics for multiple texts.
-
-        Note:
-            For consistent preprocessing, use `preprocess_text()` from
-            `entroprisal.utils` before calling this method.
+    def calculate_batch(self, token_lists: List[List[str]]) -> pd.DataFrame:
+        """Calculate bidirectional rest-of-word metrics for multiple token lists.
 
         Args:
-            texts: List of text strings (should be lowercase, letters and spaces only)
+            token_lists: List of token lists (as returned by `preprocess_text()`).
+                Each inner list contains lowercase alphabetic token strings.
 
         Returns:
-            DataFrame with one row per text and columns for each metric
+            DataFrame with one row per token list and columns for each metric
+
+        Example:
+            >>> from entroprisal import preprocess_text, RestOfWordEntropisalCalculator
+            >>> token_lists = preprocess_text(["First text.", "Second text."])
+            >>> calc = RestOfWordEntropisalCalculator(words_df)
+            >>> results_df = calc.calculate_batch(token_lists)
         """
-        results = [self.calculate_metrics(text) for text in texts]
+        results = [self.calculate_metrics(tokens) for tokens in token_lists]
         return pd.DataFrame(results)
 
     def get_word_frequency(self, word: str) -> int:

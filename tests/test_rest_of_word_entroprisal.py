@@ -27,7 +27,8 @@ def test_init(sample_words):
 def test_calculate_metrics(sample_words):
     """Test basic metric calculation."""
     calc = RestOfWordEntropisalCalculator(sample_words)
-    metrics = calc.calculate_metrics("the cat and dog")
+    tokens = ["the", "cat", "and", "dog"]
+    metrics = calc.calculate_metrics(tokens)
 
     assert "mean_word_length" in metrics
     # Left-to-right metrics (entropy and surprisal)
@@ -41,9 +42,9 @@ def test_calculate_metrics(sample_words):
 def test_calculate_batch(sample_words):
     """Test batch processing."""
     calc = RestOfWordEntropisalCalculator(sample_words)
-    texts = ["the cat", "the dog"]
+    token_lists = [["the", "cat"], ["the", "dog"]]
 
-    results = calc.calculate_batch(texts)
+    results = calc.calculate_batch(token_lists)
     assert len(results) == 2
 
 

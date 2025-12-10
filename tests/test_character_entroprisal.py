@@ -27,7 +27,8 @@ def test_init(sample_words):
 def test_calculate_metrics(sample_words):
     """Test basic metric calculation."""
     calc = CharacterEntropisalCalculator(sample_words)
-    metrics = calc.calculate_metrics("the cat and dog")
+    tokens = ["the", "cat", "and", "dog"]
+    metrics = calc.calculate_metrics(tokens)
 
     assert "char_entropy" in metrics
     assert "char_surprisal" in metrics
@@ -40,9 +41,9 @@ def test_calculate_metrics(sample_words):
 def test_calculate_batch(sample_words):
     """Test batch processing."""
     calc = CharacterEntropisalCalculator(sample_words)
-    texts = ["the cat", "the dog"]
+    token_lists = [["the", "cat"], ["the", "dog"]]
 
-    results = calc.calculate_batch(texts)
+    results = calc.calculate_batch(token_lists)
     assert len(results) == 2
 
 

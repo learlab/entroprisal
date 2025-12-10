@@ -117,15 +117,12 @@ class CharacterEntropisalCalculator:
         self.bigraph_char_surprisal_lookup = construct_surprisal_lookup(self.bigraph_to_char)
         self.trigraph_char_surprisal_lookup = construct_surprisal_lookup(self.trigraph_to_char)
 
-    def calculate_metrics(self, text: str) -> Dict[str, float]:
-        """Calculate character-level entropy and surprisal metrics for a text.
-
-        Note:
-            For consistent preprocessing, use `preprocess_text()` from
-            `entroprisal.utils` before calling this method.
+    def calculate_metrics(self, tokens: List[str]) -> Dict[str, float]:
+        """Calculate character-level entropy and surprisal metrics for a token list.
 
         Args:
-            text: Input text string (should be lowercase, letters and spaces only)
+            tokens: List of token strings (as returned by `preprocess_text()`).
+                Tokens should be lowercase alphabetic strings.
 
         Returns:
             Dictionary with metrics:
@@ -141,8 +138,14 @@ class CharacterEntropisalCalculator:
                 - bigraph_surprisal_support: Number of bigraphs with coverage
                 - trigraph_entropy_support: Number of trigraphs with coverage
                 - trigraph_surprisal_support: Number of trigraphs with coverage
+
+        Example:
+            >>> from entroprisal import preprocess_text, CharacterEntropisalCalculator
+            >>> tokens = preprocess_text("The quick brown fox")[0]
+            >>> calc = CharacterEntropisalCalculator(words_df)
+            >>> metrics = calc.calculate_metrics(tokens)
         """
-        words = text.lower().split()
+        words = [token.lower() for token in tokens]
 
         char_char_entropies = []
         char_char_surprisals = []
@@ -224,20 +227,23 @@ class CharacterEntropisalCalculator:
 
         return metrics
 
-    def calculate_batch(self, texts: List[str]) -> pd.DataFrame:
-        """Calculate character-level entropy and surprisal metrics for multiple texts.
-
-        Note:
-            For consistent preprocessing, use `preprocess_text()` from
-            `entroprisal.utils` before calling this method.
+    def calculate_batch(self, token_lists: List[List[str]]) -> pd.DataFrame:
+        """Calculate character-level entropy and surprisal metrics for multiple token lists.
 
         Args:
-            texts: List of text strings (should be lowercase, letters and spaces only)
+            token_lists: List of token lists (as returned by `preprocess_text()`).
+                Each inner list contains lowercase alphabetic token strings.
 
         Returns:
-            DataFrame with one row per text and columns for each metric
+            DataFrame with one row per token list and columns for each metric
+
+        Example:
+            >>> from entroprisal import preprocess_text, CharacterEntropisalCalculator
+            >>> token_lists = preprocess_text(["First text.", "Second text."])
+            >>> calc = CharacterEntropisalCalculator(words_df)
+            >>> results_df = calc.calculate_batch(token_lists)
         """
-        results = [self.calculate_metrics(text) for text in texts]
+        results = [self.calculate_metrics(tokens) for tokens in token_lists]
         return pd.DataFrame(results)
 
     def get_character_entropy(self, char: str) -> Optional[float]:

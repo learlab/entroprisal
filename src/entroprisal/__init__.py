@@ -8,20 +8,24 @@ on text based on reference corpora, including:
 
 Example usage:
     >>> from entroprisal import TokenEntropisalCalculator, CharacterEntropisalCalculator
+    >>> from entroprisal import preprocess_text
     >>> from entroprisal.utils import load_4grams, load_google_books_words
+
+    >>> # Preprocess text to get tokens
+    >>> tokens = preprocess_text("The cat sat on the mat")[0]
 
     >>> # Token-level entropy and surprisal
     >>> ngrams = load_4grams("aw")
     >>> token_calc = TokenEntropisalCalculator(ngrams, min_frequency=100)
-    >>> metrics = token_calc.calculate_metrics(["the", "cat", "sat"])
+    >>> metrics = token_calc.calculate_metrics(tokens)
 
     >>> # Character-level entropy and surprisal
     >>> words_df = load_google_books_words()
     >>> char_calc = CharacterEntropisalCalculator(words_df)
-    >>> metrics = char_calc.calculate_metrics("The cat sat on the mat")
+    >>> metrics = char_calc.calculate_metrics(tokens)
 """
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 from .character_entroprisal import CharacterEntropisalCalculator
 from .rest_of_word_entroprisal import RestOfWordEntropisalCalculator

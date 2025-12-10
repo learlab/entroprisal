@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "entroprisal"
-version = "0.2.2"
+version = "0.2.3"
 description = "Calculate entropy-based linguistic metrics on text using reference corpora"
 readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.9"

@@ -106,7 +106,7 @@ print(metrics)
 ### Character-Level Entropy and Surprisal
 
 ```python
-from entroprisal import CharacterEntropisalCalculator
+from entroprisal import CharacterEntropisalCalculator, preprocess_text
 from entroprisal.utils import load_google_books_words
 
 # Load word frequency data
@@ -115,9 +115,12 @@ words_df = load_google_books_words()
 # Initialize calculator
 calc = CharacterEntropisalCalculator(words_df)
 
-# Calculate metrics for text
+# Preprocess text to get tokens
 text = "The quick brown fox jumps over the lazy dog"
-metrics = calc.calculate_metrics(text)
+tokens = preprocess_text(text)[0]  # Get first document's tokens
+
+# Calculate metrics for tokens
+metrics = calc.calculate_metrics(tokens)
 
 print(metrics)
 # Output includes:
@@ -129,7 +132,7 @@ print(metrics)
 ### Rest-of-Word Entropy and Surprisal (Character-Level, Bidirectional)
 
 ```python
-from entroprisal import RestOfWordEntropisalCalculator
+from entroprisal import RestOfWordEntropisalCalculator, preprocess_text
 from entroprisal.utils import load_google_books_words
 
 # Load word frequency data
@@ -138,9 +141,12 @@ words_df = load_google_books_words()
 # Initialize calculator
 calc = RestOfWordEntropisalCalculator(words_df)
 
-# Calculate metrics for text
+# Preprocess text to get tokens
 text = "The quick brown fox"
-metrics = calc.calculate_metrics(text)
+tokens = preprocess_text(text)[0]  # Get first document's tokens
+
+# Calculate metrics for tokens
+metrics = calc.calculate_metrics(tokens)
 
 print(metrics)
 # Output includes:
@@ -155,18 +161,21 @@ print(metrics)
 
 ### Batch Processing
 
-All calculators support batch processing:
+All calculators support batch processing with token lists:
 
 ```python
-# Process multiple texts at once
+from entroprisal import preprocess_text
+
+# Preprocess multiple texts at once
 texts = [
     "First text sample",
     "Second text sample",
     "Third text sample"
 ]
+token_lists = preprocess_text(texts)  # Returns list of token lists
 
-# Returns a pandas DataFrame with one row per text
-results_df = calc.calculate_batch(texts)
+# Returns a pandas DataFrame with one row per document
+results_df = calc.calculate_batch(token_lists)
 print(results_df)
 ```
 
@@ -188,8 +197,8 @@ Calculate character-level transition entropy and surprisal.
 
 **Methods:**
 
-- `calculate_metrics(text: str) -> Dict[str, float]`: Calculate metrics for text
-- `calculate_batch(texts: List[str]) -> pd.DataFrame`: Batch processing
+- `calculate_metrics(tokens: List[str]) -> Dict[str, float]`: Calculate metrics for a token list
+- `calculate_batch(token_lists: List[List[str]]) -> pd.DataFrame`: Batch processing
 - `get_character_entropy(char: str) -> Optional[float]`: Lookup entropy for specific character
 - `get_character_surprisal(context: str, target: str) -> Optional[float]`: Lookup surprisal for character transition
 - `get_bigraph_entropy(bigraph: str) -> Optional[float]`: Lookup entropy for bigraph
@@ -203,8 +212,8 @@ Calculate character-level rest-of-word entropy and surprisal in both directions 
 
 **Methods:**
 
-- `calculate_metrics(text: str) -> Dict[str, float]`: Calculate metrics for text
-- `calculate_batch(texts: List[str]) -> pd.DataFrame`: Batch processing
+- `calculate_metrics(tokens: List[str]) -> Dict[str, float]`: Calculate metrics for a token list
+- `calculate_batch(token_lists: List[List[str]]) -> pd.DataFrame`: Batch processing
 - `get_word_frequency(word: str) -> int`: Get frequency of a word in reference corpus
 
 ## Utilities

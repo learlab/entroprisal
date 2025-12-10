@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2025-12-10
+
+### Changed
+- **BREAKING**: All calculators now require `List[str]` (token list) as input instead of `str`
+- **BREAKING**: `calculate_batch()` now requires `List[List[str]]` (list of token lists)
+- This aligns all calculators with `preprocess_text()` output format
+- Eliminates ambiguity between batch of strings vs. list of tokens
+
+### Migration
+Before:
+```python
+calc.calculate_metrics("The quick brown fox")
+calc.calculate_batch(["Text one", "Text two"])
+```
+
+After:
+```python
+from entroprisal import preprocess_text
+tokens = preprocess_text("The quick brown fox")[0]
+calc.calculate_metrics(tokens)
+
+token_lists = preprocess_text(["Text one", "Text two"])
+calc.calculate_batch(token_lists)
+```
+
 ## [0.2.2] - 2025-12-10
 
 ### Fixed
