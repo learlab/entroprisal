@@ -44,7 +44,7 @@ def process_dataframe(
     df: pd.DataFrame,
     text_col: str,
     metadata_col: str,
-    output_dir: str,
+    output_dir: str | Path,
     model: str = "en_core_web_lg",
     n_process: int = 32,
     batch_size: int = 512,
@@ -123,7 +123,7 @@ def process_dataframe(
         logger.info(f"Saved final DocBin {current_docbin_idx} to {output_path}")
 
 
-def load_all_docbins(directory: str, model: Optional[str] = None):
+def load_all_docbins(directory: str | Path, model: Optional[str] = None):
     """Generator function to load and yield all docs from multiple DocBin files.
 
     Args:

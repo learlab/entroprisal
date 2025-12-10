@@ -21,17 +21,19 @@ Example usage:
     >>> metrics = char_calc.calculate_metrics("The cat sat on the mat")
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .character_entroprisal import CharacterEntropisalCalculator
 from .rest_of_word_entroprisal import RestOfWordEntropisalCalculator
 from .token_entroprisal import TokenEntropisalCalculator
-from .utils import entropy
+from .utils import entropy, is_content_token, preprocess_text
 
 __all__ = [
     "TokenEntropisalCalculator",
     "CharacterEntropisalCalculator",
     "RestOfWordEntropisalCalculator",
     "entropy",
+    "preprocess_text",
+    "is_content_token",
     "__version__",
 ]

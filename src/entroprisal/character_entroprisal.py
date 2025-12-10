@@ -117,14 +117,15 @@ class CharacterEntropisalCalculator:
         self.bigraph_char_surprisal_lookup = construct_surprisal_lookup(self.bigraph_to_char)
         self.trigraph_char_surprisal_lookup = construct_surprisal_lookup(self.trigraph_to_char)
 
-    def calculate_metrics(self, text: str, preprocess: bool = True) -> Dict[str, float]:
+    def calculate_metrics(self, text: str) -> Dict[str, float]:
         """Calculate character-level entropy and surprisal metrics for a text.
 
+        Note:
+            For consistent preprocessing, use `preprocess_text()` from
+            `entroprisal.utils` before calling this method.
+
         Args:
-            text: Input text string
-            preprocess: Whether to apply basic preprocessing
-                (lowercase, remove non-letters)
-                Default True for consistency with reference corpus
+            text: Input text string (should be lowercase, letters and spaces only)
 
         Returns:
             Dictionary with metrics:
@@ -141,14 +142,7 @@ class CharacterEntropisalCalculator:
                 - trigraph_entropy_support: Number of trigraphs with coverage
                 - trigraph_surprisal_support: Number of trigraphs with coverage
         """
-        # Preprocess if requested
-        if preprocess:
-            import re
-
-            not_letter_not_space = re.compile("[^a-z ]+")
-            text = not_letter_not_space.sub("", text.lower())
-
-        words = text.split()
+        words = text.lower().split()
 
         char_char_entropies = []
         char_char_surprisals = []
@@ -230,17 +224,20 @@ class CharacterEntropisalCalculator:
 
         return metrics
 
-    def calculate_batch(self, texts: List[str], preprocess: bool = True) -> pd.DataFrame:
+    def calculate_batch(self, texts: List[str]) -> pd.DataFrame:
         """Calculate character-level entropy and surprisal metrics for multiple texts.
 
+        Note:
+            For consistent preprocessing, use `preprocess_text()` from
+            `entroprisal.utils` before calling this method.
+
         Args:
-            texts: List of text strings
-            preprocess: Whether to apply basic preprocessing
+            texts: List of text strings (should be lowercase, letters and spaces only)
 
         Returns:
             DataFrame with one row per text and columns for each metric
         """
-        results = [self.calculate_metrics(text, preprocess=preprocess) for text in texts]
+        results = [self.calculate_metrics(text) for text in texts]
         return pd.DataFrame(results)
 
     def get_character_entropy(self, char: str) -> Optional[float]:

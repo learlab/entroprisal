@@ -11,6 +11,7 @@ from typing import Optional, Union
 import numpy as np
 import pandas as pd
 import polars as pl
+from tqdm.auto import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -52,17 +53,17 @@ def entropy(probabilities: Union[np.ndarray, list], base: float = 2.0) -> float:
     """
     # Convert to numpy array if needed
     probs = np.asarray(probabilities, dtype=float)
-    
+
     # Normalize to probabilities if they're counts
     if probs.sum() > 0:
         probs = probs / probs.sum()
-    
+
     # Filter out zero probabilities to avoid log(0)
     probs = probs[probs > 0]
-    
+
     if len(probs) == 0:
         return 0.0
-    
+
     # H = -sum(p * log(p))
     return float(-np.sum(probs * np.log(probs) / np.log(base)))
 
@@ -114,14 +115,14 @@ def _download_from_hf(filename: str, cache_dir: Optional[Path] = None) -> Path:
     from huggingface_hub import hf_hub_download
 
     logger.info(f"Downloading {filename} from Hugging Face Hub...")
-    
+
     downloaded_path = hf_hub_download(
         repo_id=HF_REPO_ID,
         filename=filename,
         cache_dir=str(cache_dir) if cache_dir else None,
         repo_type=HF_REPO_TYPE,
     )
-    
+
     logger.info(f"Downloaded to {downloaded_path}")
     return Path(downloaded_path)
 
@@ -144,7 +145,7 @@ def _direct_download(filename: str, url: str, cache_dir: Optional[Path] = None) 
     # Determine cache directory
     if cache_dir is None:
         cache_dir = Path.home() / ".cache" / "entroprisal"
-    
+
     cache_dir.mkdir(parents=True, exist_ok=True)
     dest_path = cache_dir / filename
 
@@ -157,7 +158,7 @@ def _direct_download(filename: str, url: str, cache_dir: Optional[Path] = None) 
 
     # Download with progress bar
     pbar = None
-    
+
     def reporthook(block_num, block_size, total_size):
         nonlocal pbar
         if pbar is None:
@@ -226,10 +227,10 @@ def ensure_data_file(filename: str, cache_dir: Optional[Path] = None) -> Path:
             if fname == filename and key in DIRECT_URLS:
                 direct_url = DIRECT_URLS[key]
                 break
-    
+
     if direct_url:
         return _direct_download(filename, direct_url, cache_dir)
-    
+
     raise FileNotFoundError(
         f"Could not find or download {filename}. "
         f"Try installing huggingface-hub: pip install huggingface-hub"
@@ -296,32 +297,110 @@ def load_4grams(variant: str = "aw", data_path: Optional[Union[str, Path]] = Non
     return pl.scan_parquet(str(data_path))
 
 
-def preprocess_text(text: str, aggressive: bool = False) -> str:
-    """Preprocess text for entropy calculation.
+def preprocess_text(
+    text: str | list[str], content_words_only=False, spacy_model_tag="en_core_web_lg"
+) -> list[list[str]]:
+    """Preprocess text for entropy calculation."""
+    try:
+        import spacy
+    except ImportError:
+        raise ImportError(
+            "spacy is required for text preprocessing. Please install it via 'pip install spacy'."
+        )
+    try:
+        nlp = spacy.load(spacy_model_tag, disable=["ner"])
+    except OSError:
+        raise OSError(
+            f"SpaCy English model '{spacy_model_tag}' not found. "
+            f"Please download it via 'python -m spacy download {spacy_model_tag}'."
+        )
+
+    if isinstance(text, str):
+        docs = [(nlp(text))]
+    elif isinstance(text, list):
+        docs = [
+            doc
+            for doc in tqdm(
+                nlp.pipe(text, n_process=4, batch_size=128),
+                desc="Processing Docs",
+                total=len(text),
+            )
+        ]
+
+    if content_words_only:
+        tokens = [[token.lower_ for token in doc if is_content_token(token)] for doc in docs]
+    else:
+        tokens = [[token.lower_ for token in doc] for doc in docs]
+
+    return tokens
+
+def is_content_token(token) -> bool:
+    """
+    Check if a token is a content word using spaCy's fine-grained Penn Treebank tags
+    and dependency relations.
+
+    Content word tags:
+    Nouns:
+        - NN: Noun, singular
+        - NNS: Noun, plural
+        - NNP: Proper noun, singular
+        - NNPS: Proper noun, plural
+
+    Verbs:
+        - VB, VBD, VBG, VBN, VBP, VBZ: All verb forms
+        (auxiliary function determined by dependency)
+
+    Adjectives:
+        - JJ: Adjective
+        - JJR: Comparative adjective
+        - JJS: Superlative adjective
+
+    Adverbs:
+        - RB: Adverb
+        - RBR: Comparative adverb
+        - RBS: Superlative adverb
 
     Args:
-        text: Input text string
-        aggressive: If True, removes all non-letter, non-space characters.
-            If False, applies minimal preprocessing.
+        token: spaCy Token object with dependency annotations
 
     Returns:
-        Preprocessed text string
-
-    Example:
-        >>> preprocess_text("Hello, World! 123", aggressive=True)
-        'hello world'
-        >>> preprocess_text("Hello, World! 123", aggressive=False)
-        'hello, world! 123'
+        bool: True if the token has a content word tag and is not an auxiliary
     """
-    import re
+    content_tags = {
+        # Nouns
+        "NN",
+        "NNS",
+        "NNP",
+        "NNPS",
+        # Verbs (will check dep for auxiliary function)
+        "VB",
+        "VBD",
+        "VBG",
+        "VBN",
+        "VBP",
+        "VBZ",
+        # Adjectives
+        "JJ",
+        "JJR",
+        "JJS",
+        # Adverbs
+        "RB",
+        "RBR",
+        "RBS",
+    }
 
-    if aggressive:
-        # Remove all non-letter, non-space characters
-        not_letter_not_space = re.compile("[^a-z ]+")
-        return not_letter_not_space.sub("", text.lower())
-    else:
-        # Just lowercase
-        return text.lower()
+    # Auxiliary dependency labels
+    auxiliary_deps = {"aux", "auxpass"}
+
+    # Check if it's a content tag
+    if token.tag_ not in content_tags:
+        return False
+
+    # If it's a verb, check if it's functioning as an auxiliary
+    if token.tag_.startswith("VB"):
+        return token.dep_ not in auxiliary_deps
+
+    return True
 
 
 def get_package_version() -> str:

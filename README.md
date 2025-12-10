@@ -32,7 +32,7 @@ pip install entroprisal
 
 `huggingface-hub` is used for faster downloads with caching (recommended)
 
-`spacy` is used for classifying content words vs. function words in your target text
+`spacy` is used for classifying content words vs. function words in your target text and for tokenization.
 
 If using SpaCy, you will need to download a SpaCy language model as well:
 
@@ -53,7 +53,7 @@ uv pip install -e .[dev]
 
 ## Data Files
 
-Reference corpus files are automatically downloaded from [Hugging Face Hub](https://huggingface.co/datasets/learlab/entroprisal-data) on first use:
+Reference corpus files are automatically downloaded from [Hugging Face Hub](https://huggingface.co/datasets/langdonholmes/slimpajama-ngrams) on first use:
 
 - `google-books-dictionary-words.txt` - Word frequencies (included in package)
 - `4grams_aw.parquet` - All-word 4-gram frequencies (~2GiB)
@@ -62,6 +62,23 @@ Reference corpus files are automatically downloaded from [Hugging Face Hub](http
 Files are cached locally to avoid re-downloading. To use the faster Hugging Face Hub downloader with resume capability, install with `pip install entroprisal[hf]`.
 
 ## Quick Start
+
+### Text Preprocessing
+
+For best results, preprocess your text using the `preprocess_text()` function, which uses spaCy for tokenization. This ensures consistency with how the reference corpora were prepared.
+
+```python
+from entroprisal import preprocess_text
+
+# Preprocess text (requires spaCy: pip install entroprisal[spacy])
+text = "The quick brown fox jumps over the lazy dog."
+tokens = preprocess_text(text)
+# [['the', 'quick', 'brown', 'fox', 'jumps', 'over', 'the', 'lazy', 'dog']]
+
+# For content-word-only analysis (nouns, verbs, adjectives, adverbs)
+content_tokens = preprocess_text(text, content_words_only=True)
+# [['quick', 'brown', 'fox', 'jumps', 'lazy', 'dog']]
+```
 
 ### Token-Level Entropy and Surprisal
 
@@ -171,10 +188,10 @@ Calculate character-level transition entropy and surprisal.
 
 **Methods:**
 
-- `calculate_metrics(text: str, preprocess: bool = True) -> Dict[str, float]`: Calculate metrics for text
-- `calculate_batch(texts: List[str], preprocess: bool = True) -> pd.DataFrame`: Batch processing
+- `calculate_metrics(text: str) -> Dict[str, float]`: Calculate metrics for text
+- `calculate_batch(texts: List[str]) -> pd.DataFrame`: Batch processing
 - `get_character_entropy(char: str) -> Optional[float]`: Lookup entropy for specific character
-- `get_character_surprisal(char: str) -> Optional[float]`: Lookup surprisal for specific character
+- `get_character_surprisal(context: str, target: str) -> Optional[float]`: Lookup surprisal for character transition
 - `get_bigraph_entropy(bigraph: str) -> Optional[float]`: Lookup entropy for bigraph
 - `get_bigraph_surprisal(bigraph: str) -> Optional[float]`: Lookup surprisal for bigraph
 - `get_trigraph_entropy(trigraph: str) -> Optional[float]`: Lookup entropy for trigraph
@@ -186,8 +203,8 @@ Calculate character-level rest-of-word entropy and surprisal in both directions 
 
 **Methods:**
 
-- `calculate_metrics(text: str, preprocess: bool = True) -> Dict[str, float]`: Calculate metrics for text
-- `calculate_batch(texts: List[str], preprocess: bool = True) -> pd.DataFrame`: Batch processing
+- `calculate_metrics(text: str) -> Dict[str, float]`: Calculate metrics for text
+- `calculate_batch(texts: List[str]) -> pd.DataFrame`: Batch processing
 - `get_word_frequency(word: str) -> int`: Get frequency of a word in reference corpus
 
 ## Utilities
@@ -197,7 +214,8 @@ from entroprisal.utils import (
     load_google_books_words,
     load_4grams,
     get_data_dir,
-    preprocess_text
+    preprocess_text,
+    is_content_token
 )
 
 # Load reference data
@@ -208,8 +226,21 @@ ngrams_cw = load_4grams("cw")
 # Get data directory path
 data_dir = get_data_dir()
 
-# Preprocess text
-cleaned = preprocess_text("Text with punctuation!", aggressive=True)
+# Preprocess text with spaCy tokenization
+# Returns list of token lists (one per document)
+tokens = preprocess_text("The quick brown fox jumps over the lazy dog.")
+# [['the', 'quick', 'brown', 'fox', 'jumps', 'over', 'the', 'lazy', 'dog']]
+
+# Process multiple texts
+texts = ["First sentence.", "Second sentence."]
+token_lists = preprocess_text(texts)
+
+# Extract only content words (nouns, verbs, adjectives, adverbs)
+content_tokens = preprocess_text("The quick brown fox jumps.", content_words_only=True)
+# [['quick', 'brown', 'fox', 'jumps']]  # 'the' filtered out
+
+# Use a different spaCy model
+tokens = preprocess_text("Some text", spacy_model_tag="en_core_web_sm")
 ```
 
 ## Examples
@@ -245,20 +276,24 @@ It's MIT licensed. Do what you want with it.
 
 ## Citation
 
-On the other hand, if you are an academic, please cite!
+On the other hand, if you are an academic, please cite the package as follows:
 
 ```bibtex
 @software{entroprisal,
   title = {entroprisal: Entropy-based linguistic metrics},
-  author = {Langdon Holmes},
+  author = {Langdon Holmes and Scott Crossley},
   year = {2025},
   url = {https://github.com/learlab/entroprisal}
 }
+```
+
+```apa
+Holmes, L., & Crossley, S. (2025). entroprisal: Entropy-based linguistic metrics [Computer software].
 ```
 
 ## Acknowledgments
 
 Reference data sources:
 
-- Google Books word frequencies: [gwordlist](https://github.com/hackerb9/gwordlist)
+- Google Books word frequencies: [gwordlist](https://github.com/orgtre/google-books-words)
 - N-gram token frequencies: Derived from the slimpajama test set [slimpajama](https://www.cerebras.ai/blog/slimpajama-a-627b-token-cleaned-and-deduplicated-version-of-redpajama)

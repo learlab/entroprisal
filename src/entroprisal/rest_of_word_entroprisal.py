@@ -148,12 +148,15 @@ class RestOfWordEntropisalCalculator:
         self.rl_c2_surprisal_lookup = construct_surprisal_lookup(self.rl_c2)
         self.rl_c3_surprisal_lookup = construct_surprisal_lookup(self.rl_c3)
 
-    def calculate_metrics(self, text: str, preprocess: bool = True) -> Dict[str, float]:
+    def calculate_metrics(self, text: str) -> Dict[str, float]:
         """Calculate bidirectional rest-of-word entropy and surprisal metrics for text.
 
+        Note:
+            For consistent preprocessing, use `preprocess_text()` from
+            `entroprisal.utils` before calling this method.
+
         Args:
-            text: Input text string
-            preprocess: Whether to apply basic preprocessing (lowercase, remove non-letters)
+            text: Input text string (should be lowercase, letters and spaces only)
 
         Returns:
             Dictionary with metrics:
@@ -172,14 +175,7 @@ class RestOfWordEntropisalCalculator:
                 - rl_c3_surprisal: Right-to-left surprisal (3 char context)
                 - Support counts for each metric
         """
-        # Preprocess if requested
-        if preprocess:
-            import re
-
-            not_letter_not_space = re.compile("[^a-z ]+")
-            text = not_letter_not_space.sub("", text.lower())
-
-        words = text.split()
+        words = text.lower().split()
 
         lr_c1_entropies = []
         lr_c1_surprisals = []
@@ -313,17 +309,20 @@ class RestOfWordEntropisalCalculator:
 
         return metrics
 
-    def calculate_batch(self, texts: List[str], preprocess: bool = True) -> pd.DataFrame:
+    def calculate_batch(self, texts: List[str]) -> pd.DataFrame:
         """Calculate bidirectional rest-of-word metrics for multiple texts.
 
+        Note:
+            For consistent preprocessing, use `preprocess_text()` from
+            `entroprisal.utils` before calling this method.
+
         Args:
-            texts: List of text strings
-            preprocess: Whether to apply basic preprocessing
+            texts: List of text strings (should be lowercase, letters and spaces only)
 
         Returns:
             DataFrame with one row per text and columns for each metric
         """
-        results = [self.calculate_metrics(text, preprocess=preprocess) for text in texts]
+        results = [self.calculate_metrics(text) for text in texts]
         return pd.DataFrame(results)
 
     def get_word_frequency(self, word: str) -> int:
