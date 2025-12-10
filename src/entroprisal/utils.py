@@ -99,6 +99,42 @@ def get_data_dir() -> Path:
     )
 
 
+def _get_bundled_data_path(filename: str) -> Optional[Path]:
+    """Get path to a data file bundled with the package.
+
+    Args:
+        filename: Name of the file in the data directory
+
+    Returns:
+        Path to the file if found, None otherwise
+    """
+    try:
+        # Python 3.9+
+        from importlib.resources import as_file, files
+
+        data_files = files("entroprisal") / "data" / filename
+        # Check if the resource exists
+        try:
+            with as_file(data_files) as path:
+                if path.exists():
+                    return path
+        except (FileNotFoundError, TypeError):
+            pass
+    except ImportError:
+        pass
+
+    # Fallback: try relative to package
+    try:
+        data_dir = get_data_dir()
+        path = data_dir / filename
+        if path.exists():
+            return path
+    except FileNotFoundError:
+        pass
+
+    return None
+
+
 def _download_from_hf(filename: str, cache_dir: Optional[Path] = None) -> Path:
     """Download a file from Hugging Face Hub.
 
@@ -240,9 +276,11 @@ def ensure_data_file(filename: str, cache_dir: Optional[Path] = None) -> Path:
 def load_google_books_words(data_path: Optional[Union[str, Path]] = None) -> pd.DataFrame:
     """Load Google Books word frequency data.
 
+    This data file is bundled with the package and does not require downloading.
+
     Args:
         data_path: Optional path to the google-books-dictionary-words.txt file.
-            If None, tries to find it locally or downloads from Hugging Face Hub.
+            If None, uses the bundled data file included with the package.
 
     Returns:
         DataFrame with columns: WORD, COUNT
@@ -252,7 +290,21 @@ def load_google_books_words(data_path: Optional[Union[str, Path]] = None) -> pd.
         >>> print(df.head())
     """
     if data_path is None:
-        data_path = ensure_data_file(DATA_FILES["google_books"])
+        # Use bundled data file
+        bundled_path = _get_bundled_data_path(DATA_FILES["google_books"])
+        if bundled_path is not None:
+            data_path = bundled_path
+        else:
+            # Fallback to data directory lookup
+            try:
+                data_dir = get_data_dir()
+                data_path = data_dir / DATA_FILES["google_books"]
+            except FileNotFoundError:
+                raise FileNotFoundError(
+                    "Google Books data file not found. "
+                    "This file should be bundled with the package. "
+                    "Please reinstall entroprisal."
+                )
     else:
         data_path = Path(data_path)
 
@@ -316,7 +368,7 @@ def preprocess_text(
         )
 
     if isinstance(text, str):
-        docs = [(nlp(text))]
+        docs = [nlp(text)]
     elif isinstance(text, list):
         docs = [
             doc
@@ -333,6 +385,7 @@ def preprocess_text(
         tokens = [[token.lower_ for token in doc] for doc in docs]
 
     return tokens
+
 
 def is_content_token(token) -> bool:
     """
