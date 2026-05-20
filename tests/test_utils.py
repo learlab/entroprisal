@@ -2,7 +2,7 @@
 
 import pytest
 
-from entroprisal.utils import is_content_token, preprocess_text
+from entroprisal.utils import preprocess_text
 
 
 @pytest.fixture

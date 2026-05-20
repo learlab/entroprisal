@@ -17,7 +17,10 @@ Example usage:
     >>> # Token-level entropy and surprisal
     >>> ngrams = load_4grams("aw")
     >>> token_calc = TokenEntropisalCalculator(ngrams, min_frequency=100)
-    >>> metrics = token_calc.calculate_metrics(tokens)
+    >>> metrics = token_calc.calculate_metrics(tokens)  # per-document aggregate means
+
+    >>> # Per-position surprisal, entropy reduction, and entropy difference
+    >>> per_position = token_calc.compute_all(tokens)  # one row per token position
 
     >>> # Character-level entropy and surprisal
     >>> words_df = load_google_books_words()

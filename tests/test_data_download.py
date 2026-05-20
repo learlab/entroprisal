@@ -1,7 +1,7 @@
 """Tests for data download functionality."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -9,8 +9,6 @@ from entroprisal.utils import (
     DATA_FILES,
     DIRECT_URLS,
     HF_REPO_ID,
-    _direct_download,
-    _download_from_hf,
     ensure_data_file,
 )
 
