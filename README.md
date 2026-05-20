@@ -97,11 +97,56 @@ tokens = ["the", "quick", "brown", "fox"]
 metrics = calc.calculate_metrics(tokens)
 
 print(metrics)
-# Output includes:
+# Output includes (per-document means over attested positions):
 # - ngram_surprisal_1, ngram_surprisal_2, ngram_surprisal_3
 # - ngram_entropy_1, ngram_entropy_2, ngram_entropy_3
+# - entropy_reduction_2, entropy_reduction_3
+# - entropy_difference_1, entropy_difference_2, entropy_difference_3
 # - Support counts for each metric
 ```
+
+### Per-Position Token Metrics
+
+In addition to per-document means, `TokenEntropisalCalculator` exposes **per-position**
+metrics that return a `pandas.DataFrame` with one row per token. Throughout, the suffix
+`n` is the conditioning context length, matching `ngram_surprisal_n` (so `n=3` is the
+4-gram). Contexts that are unattested in the reference corpus — or positions too early to
+have a full context — yield `NaN` and a `False` availability flag (no backoff is applied).
+
+```python
+tokens = ["the", "quick", "brown", "fox"]
+
+# Surprisal: -log2 P(w_t | w_{t-3}, w_{t-2}, w_{t-1}), the information value of each token.
+calc.surprisal(tokens)
+# columns: position, token, surprisal, surprisal_available
+
+# Entropy reduction (Hale-style, conditional mutual information):
+#   H(W_t | w_{t-n}..w_{t-2}) - H(W_t | w_{t-n}..w_{t-1})
+# How much observing the most recent context word reduced uncertainty about a fixed
+# target. n=3 (default) is the 4-gram; n=2 is the trigram. Clipped at 0 by default.
+calc.entropy_reduction(tokens, n=3)
+calc.entropy_reduction(tokens, n=2, signed=True)  # keep negative values
+# columns: position, token, entropy_reduction, available
+
+# Entropy difference (Lowder-style): E_n[t-1] - E_n[t], the change in next-word entropy
+# from one position to the next. NOTE: this differences entropies over *different* random
+# variables (adjacent positions), unlike entropy_reduction's H(X) - H(X|y) over a fixed
+# target. n in {1, 2, 3}; n=3 (default) reproduces the original Lowder et al. (2018)
+# definition, n=1 is the simplest token-token (bigram) form. Clipped at 0 by default.
+calc.entropy_difference(tokens, n=3)
+# columns: position, token, entropy_difference, available
+
+# Everything at once, at every context length (best for comparative analysis):
+calc.compute_all(tokens)
+# columns: position, token, surprisal,
+#          entropy_reduction_2, entropy_reduction_3,
+#          entropy_difference_1, entropy_difference_2, entropy_difference_3,
+#          and a matching *_available flag for each metric
+```
+
+All four methods accept a `base` argument (default `2.0` for bits); `entropy_reduction`
+and `entropy_difference` additionally accept `signed` (default `False`, clipping negatives
+to 0 per Hale's convention).
 
 ### Character-Level Entropy and Surprisal
 
@@ -187,8 +232,12 @@ Calculate token-level entropy and surprisal metrics using n-gram frequencies.
 
 **Methods:**
 
-- `calculate_metrics(tokens: List[str]) -> Dict[str, float]`: Calculate metrics for a token list
+- `calculate_metrics(tokens: List[str]) -> Dict[str, float]`: Per-document mean metrics for a token list
 - `calculate_batch(token_lists: List[List[str]]) -> pd.DataFrame`: Batch processing
+- `surprisal(tokens, *, base=2.0) -> pd.DataFrame`: Per-position surprisal
+- `entropy_reduction(tokens, *, n=3, signed=False, base=2.0) -> pd.DataFrame`: Per-position entropy reduction (conditional mutual information; `n` in {2, 3})
+- `entropy_difference(tokens, *, n=3, signed=False, base=2.0) -> pd.DataFrame`: Per-position entropy difference (Lowder-style; `n` in {1, 2, 3})
+- `compute_all(tokens, *, signed=False, base=2.0) -> pd.DataFrame`: All per-position metrics at every context length
 - `get_detailed_ngram_analysis(tokens: List[str]) -> Dict[int, pd.DataFrame]`: Detailed per-token analysis
 
 ### CharacterEntropisalCalculator
