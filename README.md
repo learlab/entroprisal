@@ -40,6 +40,8 @@ SpaCy and Hugging Face Hub are optional dependencies for additional functionalit
 pip install entroprisal
 ```
 
+The minimal installation exists primarily as a stable version, since SpaCy and Hugging Face Hub dependencies are updated frequently and may cause installation issues in some environments. However, the full installation with `pip install entroprisal[all]` is recommended for the best experience and performance.
+
 ### Optional Dependencies included in `all`
 
 `huggingface-hub` is used for faster downloads with caching (recommended)
@@ -71,7 +73,7 @@ Reference corpus files are automatically downloaded from [Hugging Face Hub](http
 - `4grams_aw.parquet` - All-word 4-gram frequencies (~2GiB)
 - `4grams_cw.parquet` - Content-word 4-gram frequencies (~1.8GiB)
 
-Files are cached locally to avoid re-downloading. To use the faster Hugging Face Hub downloader with resume capability, install with `pip install entroprisal[hf]`.
+Files are cached locally to avoid re-downloading. To use the faster Hugging Face Hub downloader with resume capability, install with `pip install entroprisal[hf]` or `pip install entroprisal[all]`.
 
 ## Quick Start
 
@@ -122,8 +124,8 @@ print(metrics)
 In addition to per-document means, `TokenEntropisalCalculator` exposes **per-position**
 metrics that return a `pandas.DataFrame` with one row per token. Throughout, the suffix
 `n` is the conditioning context length, matching `ngram_surprisal_n` (so `n=3` is the
-4-gram). Contexts that are unattested in the reference corpus — or positions too early to
-have a full context — yield `NaN` and a `False` availability flag (no backoff is applied).
+4-gram). Contexts that are unattested in the reference corpus yield `NaN` and a `False`
+availability flag.
 
 ```python
 tokens = ["the", "quick", "brown", "fox"]
@@ -138,8 +140,7 @@ calc.surprisal(tokens, n=2)        # trigram
 #   H(W_t | w_{t-n}..w_{t-2}) - H(W_t | w_{t-n}..w_{t-1})
 # How much observing the most recent context word reduced uncertainty about a fixed
 # target. n=3 (default) is the 4-gram; n=2 the trigram; n=1 the bigram (with the
-# marginal H(W_t) as the Distribution A baseline -- this is mutual information
-# between adjacent tokens). Clipped at 0 by default.
+# marginal H(W_t) as the Distribution A baseline). Clipped at 0 by default.
 calc.entropy_reduction(tokens, n=3)
 calc.entropy_reduction(tokens, n=1)
 calc.entropy_reduction(tokens, n=2, signed=True)  # keep negative values
