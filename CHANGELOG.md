@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-05-20
+
+### Changed
+- README updates only.
+
+## [0.3.0] - 2026-05-20
+
+### Added
+- `TokenEntropisalCalculator.entropy_reduction(tokens, *, n=3, signed=False, base=2.0)`: per-position Hale-style conditional mutual information `H(W_t | w_{t-n}..w_{t-2}) - H(W_t | w_{t-n}..w_{t-1})` for `n` in {2, 3}.
+- `TokenEntropisalCalculator.entropy_difference(tokens, *, n=3, signed=False, base=2.0)`: per-position Lowder-style entropy difference `E_n[t-1] - E_n[t]` for `n` in {1, 2, 3}.
+- `TokenEntropisalCalculator.compute_all(tokens, ...)`: convenience method returning all per-position metrics at every context length in one DataFrame.
+- New aggregate keys in `TokenEntropisalCalculator.calculate_metrics`: `entropy_reduction_{2,3}`, `entropy_difference_{1,2,3}` (plus matching `_support` counts).
+
+## [0.4.0] - 2026-05-26
+
+### Added
+- **Per-position metrics for `CharacterEntropisalCalculator`**: `surprisal`, `entropy_reduction`, `entropy_difference`, and `compute_all` now return per-character-position DataFrames, mirroring the token-level API.
+- **Per-word metrics for `RestOfWordEntropisalCalculator`**: `surprisal`, `entropy_reduction`, and `compute_all` return per-word DataFrames, parameterized by `direction` (`"lr"` or `"rl"`).
+- **Character-level entropy reduction** (Hale-style conditional mutual information): `H(c_i | c_{i-n}..c_{i-2}) - H(c_i | c_{i-n}..c_{i-1})` for `n` in {1, 2, 3}.
+- **Character-level entropy difference** (Lowder-style): `E_n[i-1] - E_n[i]` within each word, for `n` in {1, 2, 3}.
+- **Rest-of-word entropy reduction** in both directions: `H(W | (n-1) chars) - H(W | n chars)` for `n` in {1, 2, 3}. Because the conditioning target is the same (word identity) across prefix lengths, this is the clean Hale-style CMI directly parallel to Hale (2016)'s parse-given-words formulation.
+- **`n=1` entropy reduction** for `TokenEntropisalCalculator` and `CharacterEntropisalCalculator`, using the marginal target entropy as the Distribution A baseline. Reduces to mutual information between adjacent tokens / characters.
+- **`n` parameter on per-position `surprisal()`** for token and character calculators (`n` in {1, 2, 3}; default `n=3`).
+- **Marginal-entropy attributes**: `TokenEntropisalCalculator.token_marginal_entropy`, `CharacterEntropisalCalculator.char_marginal_entropy`, `RestOfWordEntropisalCalculator.word_marginal_entropy`.
+- New aggregate keys in `calculate_metrics`: `char_entropy_reduction_{1,2,3}`, `char_entropy_difference_{1,2,3}`, `{lr,rl}_entropy_reduction_{1,2,3}` (plus matching `_support` counts).
+- Metrics-at-a-glance table in the README.
+
+### Changed
+- **BREAKING**: `TokenEntropisalCalculator.compute_all` and `CharacterEntropisalCalculator.compute_all` now expose `surprisal_1`, `surprisal_2`, `surprisal_3` columns instead of a single `surprisal` column. The standalone `surprisal()` method still returns a column named `surprisal`.
+- `TokenEntropisalCalculator.ENTROPY_REDUCTION_NS` is now `(1, 2, 3)` (was `(2, 3)`).
+- `CharacterEntropisalCalculator.ENTROPY_REDUCTION_NS` is now `(1, 2, 3)` (was previously undefined; entropy reduction is new at this level).
+
+### Fixed
+- Notebook examples (`examples/usage_examples.ipynb`) previously passed raw strings to `CharacterEntropisalCalculator.calculate_metrics` and `RestOfWordEntropisalCalculator.calculate_metrics` (and their batch variants). Strings silently iterated as character "tokens", producing incorrect results. Cells now tokenize via `preprocess_text` first.
+
+### Migration
+The only breaking change is the `compute_all` column rename on token and character calculators:
+```python
+# Before:
+df = calc.compute_all(tokens)
+df["surprisal"]       # was the 4-gram (or trigraph) surprisal
+
+# After:
+df = calc.compute_all(tokens)
+df["surprisal_3"]     # 4-gram (or trigraph) surprisal — same values as before
+df["surprisal_2"]     # trigram (or bigraph) surprisal — newly available
+df["surprisal_1"]     # bigram (or single-char) surprisal — newly available
+```
+The standalone `calc.surprisal(tokens)` method is unchanged at its default (`n=3`); use `calc.surprisal(tokens, n=1)` or `n=2` to access the shorter contexts.
+
 ## [0.2.3] - 2025-12-10
 
 ### Changed
