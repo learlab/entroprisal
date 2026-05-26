@@ -18,11 +18,11 @@ These metrics are useful for analyzing text complexity, readability, and informa
 
 | Calculator | Direction | Surprisal | Entropy | Entropy reduction | Entropy difference |
 |---|---|---|---|---|---|
-| `TokenEntropisalCalculator` | forward | n = 1, 2, 3 | n = 1, 2, 3 | n = 2, 3 | n = 1, 2, 3 |
-| `CharacterEntropisalCalculator` | forward | n = 1, 2, 3 | n = 1, 2, 3 | n = 2, 3 | n = 1, 2, 3 |
+| `TokenEntropisalCalculator` | forward | n = 1, 2, 3 | n = 1, 2, 3 | n = 1, 2, 3 | n = 1, 2, 3 |
+| `CharacterEntropisalCalculator` | forward | n = 1, 2, 3 | n = 1, 2, 3 | n = 1, 2, 3 | n = 1, 2, 3 |
 | `RestOfWordEntropisalCalculator` | forward and backward | n = 1, 2, 3 | n = 1, 2, 3 | n = 1, 2, 3 | &mdash; |
 
-Entropy reduction at the lowest `n` requires dropping one context element; that's why it starts at `n=2` for token and character. The rest-of-word version goes down to `n=1` by using the marginal word entropy `H(W)` as the Distribution A baseline -- the reduction from observing the very first character.
+At `n=1`, entropy reduction uses the corpus-wide marginal entropy (`H(W_t)`, `H(c_i)`, or `H(W)`) as the Distribution A baseline, which makes the reduction equal to the mutual information between the target and the single preceding context element.
 
 ## Installation
 
@@ -137,8 +137,11 @@ calc.surprisal(tokens, n=2)        # trigram
 # Entropy reduction (Hale-style, conditional mutual information):
 #   H(W_t | w_{t-n}..w_{t-2}) - H(W_t | w_{t-n}..w_{t-1})
 # How much observing the most recent context word reduced uncertainty about a fixed
-# target. n=3 (default) is the 4-gram; n=2 is the trigram. Clipped at 0 by default.
+# target. n=3 (default) is the 4-gram; n=2 the trigram; n=1 the bigram (with the
+# marginal H(W_t) as the Distribution A baseline -- this is mutual information
+# between adjacent tokens). Clipped at 0 by default.
 calc.entropy_reduction(tokens, n=3)
+calc.entropy_reduction(tokens, n=1)
 calc.entropy_reduction(tokens, n=2, signed=True)  # keep negative values
 # columns: position, token, entropy_reduction, available
 
@@ -154,7 +157,7 @@ calc.entropy_difference(tokens, n=3)
 calc.compute_all(tokens)
 # columns: position, token,
 #          surprisal_1, surprisal_2, surprisal_3,
-#          entropy_reduction_2, entropy_reduction_3,
+#          entropy_reduction_1, entropy_reduction_2, entropy_reduction_3,
 #          entropy_difference_1, entropy_difference_2, entropy_difference_3,
 #          and a matching *_available flag for each metric
 ```
@@ -296,7 +299,7 @@ Calculate token-level entropy and surprisal metrics using n-gram frequencies.
 - `calculate_metrics(tokens: List[str]) -> Dict[str, float]`: Per-document mean metrics for a token list
 - `calculate_batch(token_lists: List[List[str]]) -> pd.DataFrame`: Batch processing
 - `surprisal(tokens, *, n=3, base=2.0) -> pd.DataFrame`: Per-position surprisal (`n` in {1, 2, 3})
-- `entropy_reduction(tokens, *, n=3, signed=False, base=2.0) -> pd.DataFrame`: Per-position entropy reduction (conditional mutual information; `n` in {2, 3})
+- `entropy_reduction(tokens, *, n=3, signed=False, base=2.0) -> pd.DataFrame`: Per-position entropy reduction (conditional mutual information; `n` in {1, 2, 3}; `n=1` uses the marginal `H(W_t)` as Distribution A)
 - `entropy_difference(tokens, *, n=3, signed=False, base=2.0) -> pd.DataFrame`: Per-position entropy difference (Lowder-style; `n` in {1, 2, 3})
 - `compute_all(tokens, *, signed=False, base=2.0) -> pd.DataFrame`: All per-position metrics at every context length
 - `get_detailed_ngram_analysis(tokens: List[str]) -> Dict[int, pd.DataFrame]`: Detailed per-token analysis
@@ -310,7 +313,7 @@ Calculate character-level transition entropy and surprisal.
 - `calculate_metrics(tokens: List[str]) -> Dict[str, float]`: Per-document mean metrics for a token list
 - `calculate_batch(token_lists: List[List[str]]) -> pd.DataFrame`: Batch processing
 - `surprisal(tokens, *, n=3, base=2.0) -> pd.DataFrame`: Per-position character surprisal (`n` in {1, 2, 3})
-- `entropy_reduction(tokens, *, n=3, signed=False, base=2.0) -> pd.DataFrame`: Per-position character entropy reduction (`n` in {2, 3})
+- `entropy_reduction(tokens, *, n=3, signed=False, base=2.0) -> pd.DataFrame`: Per-position character entropy reduction (`n` in {1, 2, 3}; `n=1` uses the marginal `H(c_i)` as Distribution A)
 - `entropy_difference(tokens, *, n=3, signed=False, base=2.0) -> pd.DataFrame`: Per-position character entropy difference (`n` in {1, 2, 3})
 - `compute_all(tokens, *, signed=False, base=2.0) -> pd.DataFrame`: All per-position character metrics
 - `get_character_entropy(char: str) -> Optional[float]`: Lookup entropy for specific character

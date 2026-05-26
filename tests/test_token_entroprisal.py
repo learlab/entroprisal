@@ -95,6 +95,7 @@ def test_compute_all_shape(rich_ngrams):
         "surprisal_1",
         "surprisal_2",
         "surprisal_3",
+        "entropy_reduction_1",
         "entropy_reduction_2",
         "entropy_reduction_3",
         "entropy_difference_1",
@@ -103,6 +104,7 @@ def test_compute_all_shape(rich_ngrams):
         "surprisal_1_available",
         "surprisal_2_available",
         "surprisal_3_available",
+        "entropy_reduction_1_available",
         "entropy_reduction_2_available",
         "entropy_reduction_3_available",
         "entropy_difference_1_available",
@@ -183,10 +185,40 @@ def test_entropy_reduction_n2(rich_ngrams):
 
 
 def test_entropy_reduction_invalid_n(rich_ngrams):
-    """Context lengths other than 2 or 3 are rejected for entropy reduction."""
+    """Context lengths outside 1..3 are rejected for entropy reduction."""
     calc = TokenEntropisalCalculator(rich_ngrams, min_frequency=10)
     with pytest.raises(ValueError):
-        calc.entropy_reduction(["the", "cat", "sat", "down"], n=1)
+        calc.entropy_reduction(["the", "cat", "sat", "down"], n=0)
+    with pytest.raises(ValueError):
+        calc.entropy_reduction(["the", "cat", "sat", "down"], n=4)
+
+
+def test_entropy_reduction_n1_uses_marginal(rich_ngrams):
+    """n=1 entropy reduction = H(W_t) - H(W_t | w_{t-1}); a marginal-baseline MI."""
+    calc = TokenEntropisalCalculator(rich_ngrams, min_frequency=10)
+    tokens = ["the", "cat", "sat", "down"]
+
+    # Sanity: marginal entropy is positive and matches a hand computation. The
+    # rich_ngrams fixture's filtered counts (min_frequency=10) sum to a known total;
+    # rather than recomputing it here, verify the relationship:
+    #   ER_1(t=3, target='down') = token_marginal_entropy - H(W_t | 'sat')
+    df = calc.entropy_reduction(tokens, n=1, signed=True)
+    row = df[df["position"] == 3].iloc[0]
+
+    # H(W_t | w_{t-1}='sat') from rich_ngrams: rows with token_2='sat' aggregate to
+    # {down:100, up:100} (after min_frequency=10 filtering), so H = 1.0 bit.
+    expected = calc.token_marginal_entropy - 1.0
+    assert row["entropy_reduction"] == pytest.approx(expected)
+    assert bool(row["available"]) is True
+
+
+def test_entropy_reduction_n1_unavailable_at_position_zero(rich_ngrams):
+    """At t=0 there is no preceding token, so ent_1 (and thus ER_1) is unavailable."""
+    calc = TokenEntropisalCalculator(rich_ngrams, min_frequency=10)
+    df = calc.entropy_reduction(["the", "cat", "sat"], n=1)
+    first = df[df["position"] == 0].iloc[0]
+    assert math.isnan(first["entropy_reduction"])
+    assert bool(first["available"]) is False
 
 
 def test_entropy_reduction_deterministic_is_zero(rich_ngrams):

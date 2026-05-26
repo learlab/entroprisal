@@ -32,11 +32,11 @@ class CharacterEntropisalCalculator:
     BOUNDARY = "#"
 
     # Conditioning context lengths matching the token-level convention: n is the number
-    # of preceding characters in the full distribution. Entropy reduction needs to drop
-    # one preceding char, so it is defined for n in {2, 3}; surprisal and entropy
-    # difference are plain next-char comparisons, defined for n in {1, 2, 3}.
+    # of preceding characters in the full distribution. All three metrics support
+    # n in {1, 2, 3}; entropy reduction at n=1 uses the marginal char entropy as
+    # Distribution A (the mutual information between adjacent characters).
     SURPRISAL_NS = (1, 2, 3)
-    ENTROPY_REDUCTION_NS = (2, 3)
+    ENTROPY_REDUCTION_NS = (1, 2, 3)
     ENTROPY_DIFFERENCE_NS = (1, 2, 3)
 
     def __init__(
@@ -74,6 +74,7 @@ class CharacterEntropisalCalculator:
         self._construct_entropy_lookups()
         self._construct_surprisal_lookups()
         self._construct_gap_entropy_lookups()
+        self._build_marginal_entropy()
 
     def _build_transition_counters(self):
         """Build character transition frequency dictionaries."""
@@ -151,6 +152,22 @@ class CharacterEntropisalCalculator:
         self.gap_char_entropy_lookup = construct(self.gap_char_to_char)
         self.gap_bigraph_entropy_lookup = construct(self.gap_bigraph_to_char)
 
+    def _build_marginal_entropy(self):
+        """Compute the marginal char entropy H(c), used as Distribution A at n=1.
+
+        This is the empty-context counterpart to the gap entropy lookups: summing the
+        next-char counts across every preceding-char context yields the unconditional
+        target distribution. entropy_reduction_1 = H(c) - H(c | c_{i-1}) is the mutual
+        information between adjacent characters.
+        """
+        target_counts: Counter[str] = Counter()
+        for counter in self.transitions.values():
+            target_counts.update(counter)
+        if target_counts:
+            self.char_marginal_entropy = float(entropy(list(target_counts.values())))
+        else:
+            self.char_marginal_entropy = 0.0
+
     def _construct_surprisal_lookups(self):
         """Pre-calculate surprisal values for all context-target pairs."""
 
@@ -183,7 +200,7 @@ class CharacterEntropisalCalculator:
                 - bigraph_surprisal: Mean surprisal for bigraph contexts
                 - trigraph_entropy: Mean entropy for trigraph contexts
                 - trigraph_surprisal: Mean surprisal for trigraph contexts
-                - char_entropy_reduction_{2,3}: Mean conditional-mutual-information
+                - char_entropy_reduction_{1,2,3}: Mean conditional-mutual-information
                   reduction (clipped) over attested positions, by conditioning
                   context length n; see `entropy_reduction`
                 - char_entropy_difference_{1,2,3}: Mean Lowder-style entropy
@@ -409,7 +426,10 @@ class CharacterEntropisalCalculator:
                     prev_ent[n] = ent
 
                 # Gap (Distribution A) entropy at each entropy-reduction context length.
+                # n=1's Distribution A is the scalar marginal entropy, handled in _assemble.
                 for n in self.ENTROPY_REDUCTION_NS:
+                    if n == 1:
+                        continue
                     akey = word[i - n : i - 1] if i >= n else None
                     row[f"gap_{n}"] = self._lookup_gap_entropy(n, akey)
 
@@ -428,6 +448,8 @@ class CharacterEntropisalCalculator:
             columns.append(f"ent_{n}")
             columns.append(f"ent_prev_{n}")
         for n in self.ENTROPY_REDUCTION_NS:
+            if n == 1:
+                continue
             columns.append(f"gap_{n}")
 
         if not rows:
@@ -453,11 +475,18 @@ class CharacterEntropisalCalculator:
             df[f"surprisal_{n}_available"] = df[f"surprisal_{n}"].notna()
 
         clip_targets = []
+        marginal_scaled = self.char_marginal_entropy * factor
 
         for n in self.ENTROPY_REDUCTION_NS:
             col = f"entropy_reduction_{n}"
-            df[col] = (df[f"gap_{n}"] - df[f"ent_{n}"]) * factor
-            df[f"{col}_available"] = df[f"gap_{n}"].notna() & df[f"ent_{n}"].notna()
+            if n == 1:
+                # Distribution A is the corpus-wide marginal H(c) (a scalar). The
+                # reduction is the mutual information between c_i and c_{i-1}.
+                df[col] = marginal_scaled - df[f"ent_{n}"]
+                df[f"{col}_available"] = df[f"ent_{n}"].notna()
+            else:
+                df[col] = (df[f"gap_{n}"] - df[f"ent_{n}"]) * factor
+                df[f"{col}_available"] = df[f"gap_{n}"].notna() & df[f"ent_{n}"].notna()
             clip_targets.append(col)
 
         for n in self.ENTROPY_DIFFERENCE_NS:
@@ -526,6 +555,9 @@ class CharacterEntropisalCalculator:
 
         - n=3 (default, trigraph): H(c_i | c_{i-3}, c_{i-2}) - H(c_i | c_{i-3..i-1}).
         - n=2 (bigraph):            H(c_i | c_{i-2})         - H(c_i | c_{i-2}, c_{i-1}).
+        - n=1 (single-char):        H(c_i)                   - H(c_i | c_{i-1}).
+          Distribution A is the marginal character entropy; collapses to the mutual
+          information I(c_i; c_{i-1}) between adjacent characters.
 
         This is the character-level counterpart of `TokenEntropisalCalculator.entropy_reduction`.
         Distribution A pools across more continuations than Distribution B, so when the
@@ -534,7 +566,9 @@ class CharacterEntropisalCalculator:
 
         Args:
             tokens: List of token strings.
-            n: Conditioning context length, 2 (bigraph) or 3 (trigraph, default).
+            n: Conditioning context length, 1 (single-char), 2 (bigraph), or 3
+                (trigraph, default). n=1 uses the marginal char entropy as Distribution
+                A; n>=2 drops the most recent context char and marginalizes over it.
             signed: If False (default), return max(reduction, 0). If True, return the
                 signed value (negative means the new context broadened expectations).
             base: Logarithm base (default 2.0 for bits).
@@ -627,7 +661,7 @@ class CharacterEntropisalCalculator:
 
         Returns:
             DataFrame with one row per target character position: token_index, word,
-            position, target, surprisal_{1,2,3}, entropy_reduction_{2,3},
+            position, target, surprisal_{1,2,3}, entropy_reduction_{1,2,3},
             entropy_difference_{1,2,3}, and a matching ``*_available`` flag for each
             metric.
         """
