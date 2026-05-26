@@ -92,19 +92,50 @@ def test_compute_all_shape(rich_ngrams):
     assert list(df.columns) == [
         "position",
         "token",
-        "surprisal",
+        "surprisal_1",
+        "surprisal_2",
+        "surprisal_3",
         "entropy_reduction_2",
         "entropy_reduction_3",
         "entropy_difference_1",
         "entropy_difference_2",
         "entropy_difference_3",
-        "surprisal_available",
+        "surprisal_1_available",
+        "surprisal_2_available",
+        "surprisal_3_available",
         "entropy_reduction_2_available",
         "entropy_reduction_3_available",
         "entropy_difference_1_available",
         "entropy_difference_2_available",
         "entropy_difference_3_available",
     ]
+
+
+def test_surprisal_n_parameter(rich_ngrams):
+    """surprisal(n=) selects the matching conditioning context length."""
+    calc = TokenEntropisalCalculator(rich_ngrams, min_frequency=10)
+    tokens = ["the", "cat", "sat", "down"]
+
+    # At position 3 ("down"), all three context lengths give P=100/200 -> 1.0 bit:
+    #   n=1: P(down | sat)            = 100/200
+    #   n=2: P(down | cat, sat)       = 100/200
+    #   n=3: P(down | the, cat, sat)  = 100/200
+    df1 = calc.surprisal(tokens, n=1)
+    df2 = calc.surprisal(tokens, n=2)
+    df3 = calc.surprisal(tokens)  # default n=3
+    for d in (df1, df2, df3):
+        row = d[d["position"] == 3].iloc[0]
+        assert row["surprisal"] == pytest.approx(1.0)
+        assert bool(row["surprisal_available"]) is True
+
+
+def test_surprisal_invalid_n(sample_ngrams):
+    """Context lengths outside 1..3 are rejected for surprisal."""
+    calc = TokenEntropisalCalculator(sample_ngrams, min_frequency=10)
+    with pytest.raises(ValueError):
+        calc.surprisal(["the", "cat"], n=0)
+    with pytest.raises(ValueError):
+        calc.surprisal(["the", "cat"], n=4)
 
 
 def test_per_position_surprisal_value(rich_ngrams):

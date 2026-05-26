@@ -148,13 +148,17 @@ def test_compute_all_shape(crafted_words):
         "word",
         "position",
         "target",
-        "surprisal",
+        "surprisal_1",
+        "surprisal_2",
+        "surprisal_3",
         "entropy_reduction_2",
         "entropy_reduction_3",
         "entropy_difference_1",
         "entropy_difference_2",
         "entropy_difference_3",
-        "surprisal_available",
+        "surprisal_1_available",
+        "surprisal_2_available",
+        "surprisal_3_available",
         "entropy_reduction_2_available",
         "entropy_reduction_3_available",
         "entropy_difference_1_available",
@@ -169,7 +173,7 @@ def test_compute_all_empty_input(sample_words):
     df = calc.compute_all([])
     assert len(df) == 0
     assert "entropy_reduction_2" in df.columns
-    assert "surprisal" in df.columns
+    assert "surprisal_3" in df.columns
 
 
 def test_entropy_reduction_positive(crafted_words):
@@ -296,8 +300,8 @@ def test_calculate_metrics_includes_new_keys(crafted_words):
     assert "char_entropy_reduction_2" in metrics
 
 
-def test_surprisal_uses_trigraph_context(sample_words):
-    """Per-position surprisal uses the full trigraph context (n=3)."""
+def test_surprisal_default_uses_trigraph_context(sample_words):
+    """Per-position surprisal defaults to the full trigraph context (n=3)."""
     calc = CharacterEntropisalCalculator(sample_words)
     df = calc.surprisal(["cat"])
     # "#cat#": positions 1 and 2 lack 3 preceding chars -> NaN.
@@ -310,3 +314,32 @@ def test_surprisal_uses_trigraph_context(sample_words):
     row3 = df[df["position"] == 3].iloc[0]
     assert bool(row3["surprisal_available"]) is True
     assert row3["surprisal"] is not None
+
+
+def test_surprisal_n_parameter(sample_words):
+    """surprisal(n=) selects the matching conditioning context length."""
+    calc = CharacterEntropisalCalculator(sample_words)
+
+    def avail_at(df, position):
+        return bool(df[df["position"] == position].iloc[0]["surprisal_available"])
+
+    df1 = calc.surprisal(["cat"], n=1)
+    df2 = calc.surprisal(["cat"], n=2)
+    df3 = calc.surprisal(["cat"], n=3)
+    # n=1: positions 1, 2, 3 all have >=1 preceding char and should be attested.
+    assert avail_at(df1, 1) and avail_at(df1, 2) and avail_at(df1, 3)
+    # n=2: position 1 lacks 2 preceding chars -> unavailable.
+    assert not avail_at(df2, 1)
+    assert avail_at(df2, 2) and avail_at(df2, 3)
+    # n=3: positions 1 and 2 lack 3 preceding chars -> unavailable.
+    assert not avail_at(df3, 1) and not avail_at(df3, 2)
+    assert avail_at(df3, 3)
+
+
+def test_surprisal_invalid_n(sample_words):
+    """Context lengths outside 1..3 are rejected for surprisal."""
+    calc = CharacterEntropisalCalculator(sample_words)
+    with pytest.raises(ValueError):
+        calc.surprisal(["cat"], n=0)
+    with pytest.raises(ValueError):
+        calc.surprisal(["cat"], n=4)

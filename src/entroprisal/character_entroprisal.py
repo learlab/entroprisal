@@ -33,8 +33,9 @@ class CharacterEntropisalCalculator:
 
     # Conditioning context lengths matching the token-level convention: n is the number
     # of preceding characters in the full distribution. Entropy reduction needs to drop
-    # one preceding char, so it is defined for n in {2, 3}; entropy difference is a
-    # plain next-char-entropy comparison, defined for n in {1, 2, 3}.
+    # one preceding char, so it is defined for n in {2, 3}; surprisal and entropy
+    # difference are plain next-char comparisons, defined for n in {1, 2, 3}.
+    SURPRISAL_NS = (1, 2, 3)
     ENTROPY_REDUCTION_NS = (2, 3)
     ENTROPY_DIFFERENCE_NS = (1, 2, 3)
 
@@ -371,15 +372,16 @@ class CharacterEntropisalCalculator:
         For target c_i, ent_{n} = H(c_i | c_{i-n}..c_{i-1}) is the full-context entropy
         at length n (both Distribution B for entropy reduction and the term differenced
         across positions for entropy difference). gap_{n} is the matching Distribution A
-        from the gap entropy lookups. Surprisal uses the full trigraph context (n=3).
-        Unattested or out-of-range contexts produce NaN (no backoff).
+        from the gap entropy lookups. surprisal_{n} is the surprisal of the target
+        given n preceding characters; callers select the desired n. Unattested or
+        out-of-range contexts produce NaN (no backoff).
 
         ent_prev_{n} is the previous *within-word* position's ent_{n}; it is reset to
         NaN at the start of each new word so entropy_difference never crosses word
         boundaries (matching the within-word loop semantics of `calculate_metrics`).
 
         Returns one row per (token_index, position) with columns: token_index, word,
-        position, target, surprisal, ent_{1,2,3}, ent_prev_{1,2,3}, gap_{2,3}.
+        position, target, surprisal_{1,2,3}, ent_{1,2,3}, ent_prev_{1,2,3}, gap_{2,3}.
         """
         ent_ns = sorted(set(self.ENTROPY_DIFFERENCE_NS) | set(self.ENTROPY_REDUCTION_NS))
 
@@ -411,16 +413,17 @@ class CharacterEntropisalCalculator:
                     akey = word[i - n : i - 1] if i >= n else None
                     row[f"gap_{n}"] = self._lookup_gap_entropy(n, akey)
 
-                # Surprisal at the maximal context length (trigraph, n=3) -- the most
-                # informed estimate, matching the token-level convention of using the
-                # full 4-gram context for `surprisal`.
-                bkey3 = word[i - 3 : i] if i >= 3 else None
-                row["surprisal"] = self._lookup_surprisal(3, bkey3, target)
+                # Surprisal at each context length n: -log P(c_i | n preceding chars).
+                for n in self.SURPRISAL_NS:
+                    bkey = word[i - n : i] if i >= n else None
+                    row[f"surprisal_{n}"] = self._lookup_surprisal(n, bkey, target)
 
                 rows.append(row)
 
         # Build column schema explicitly so empty inputs still yield expected columns.
-        columns = ["token_index", "word", "position", "target", "surprisal"]
+        columns = ["token_index", "word", "position", "target"]
+        for n in self.SURPRISAL_NS:
+            columns.append(f"surprisal_{n}")
         for n in ent_ns:
             columns.append(f"ent_{n}")
             columns.append(f"ent_prev_{n}")
@@ -444,9 +447,10 @@ class CharacterEntropisalCalculator:
         df = self._compute_per_position(tokens)
         factor = self._base_factor(base)
 
-        # Scale surprisal and derive its availability flag.
-        df["surprisal"] = df["surprisal"] * factor
-        df["surprisal_available"] = df["surprisal"].notna()
+        # Scale surprisal at each context length and derive availability flags.
+        for n in self.SURPRISAL_NS:
+            df[f"surprisal_{n}"] = df[f"surprisal_{n}"] * factor
+            df[f"surprisal_{n}_available"] = df[f"surprisal_{n}"].notna()
 
         clip_targets = []
 
@@ -469,16 +473,20 @@ class CharacterEntropisalCalculator:
 
         return df
 
-    def surprisal(self, tokens: List[str], *, base: float = 2.0) -> pd.DataFrame:
-        """Per-position character surprisal at the full trigraph context (n=3).
+    def surprisal(self, tokens: List[str], *, n: int = 3, base: float = 2.0) -> pd.DataFrame:
+        """Per-position character surprisal: -log P(c_i | n preceding chars).
 
-        -log P(c_i | c_{i-3}, c_{i-2}, c_{i-1}): the information value of each character
-        given the three preceding characters within the boundary-padded word. Positions
-        whose trigraph context is unattested -- or which lack three preceding chars --
-        get NaN and `surprisal_available == False` (no backoff).
+        The information value of each character given the n preceding characters within
+        the boundary-padded word. Positions whose context is unattested -- or which lack
+        n preceding chars -- get NaN and `surprisal_available == False` (no backoff).
+
+        - n=3 (default, trigraph): -log P(c_i | c_{i-3}, c_{i-2}, c_{i-1}).
+        - n=2 (bigraph):            -log P(c_i | c_{i-2}, c_{i-1}).
+        - n=1 (single char):        -log P(c_i | c_{i-1}).
 
         Args:
             tokens: List of token strings (e.g. from `preprocess_text(text)[0]`).
+            n: Conditioning context length, 1, 2, or 3 (default 3).
             base: Logarithm base (default 2.0 for bits).
 
         Returns:
@@ -486,10 +494,26 @@ class CharacterEntropisalCalculator:
             surprisal_available. One row per target character position (position 0 is
             the leading boundary and never a target).
         """
+        if n not in self.SURPRISAL_NS:
+            raise ValueError(f"n must be one of {self.SURPRISAL_NS}, got {n!r}")
         df = self._assemble(tokens, signed=True, base=base)
-        return df[
-            ["token_index", "word", "position", "target", "surprisal", "surprisal_available"]
+        out = df[
+            [
+                "token_index",
+                "word",
+                "position",
+                "target",
+                f"surprisal_{n}",
+                f"surprisal_{n}_available",
+            ]
         ].copy()
+        out = out.rename(
+            columns={
+                f"surprisal_{n}": "surprisal",
+                f"surprisal_{n}_available": "surprisal_available",
+            }
+        )
+        return out
 
     def entropy_reduction(
         self, tokens: List[str], *, n: int = 3, signed: bool = False, base: float = 2.0
@@ -603,15 +627,15 @@ class CharacterEntropisalCalculator:
 
         Returns:
             DataFrame with one row per target character position: token_index, word,
-            position, target, surprisal, entropy_reduction_{2,3},
+            position, target, surprisal_{1,2,3}, entropy_reduction_{2,3},
             entropy_difference_{1,2,3}, and a matching ``*_available`` flag for each
             metric.
         """
         df = self._assemble(tokens, signed=signed, base=base)
-        metric_cols = ["surprisal"]
+        metric_cols = [f"surprisal_{n}" for n in self.SURPRISAL_NS]
         metric_cols += [f"entropy_reduction_{n}" for n in self.ENTROPY_REDUCTION_NS]
         metric_cols += [f"entropy_difference_{n}" for n in self.ENTROPY_DIFFERENCE_NS]
-        flag_cols = ["surprisal_available"]
+        flag_cols = [f"surprisal_{n}_available" for n in self.SURPRISAL_NS]
         flag_cols += [f"entropy_reduction_{n}_available" for n in self.ENTROPY_REDUCTION_NS]
         flag_cols += [f"entropy_difference_{n}_available" for n in self.ENTROPY_DIFFERENCE_NS]
         return df[["token_index", "word", "position", "target", *metric_cols, *flag_cols]].copy()

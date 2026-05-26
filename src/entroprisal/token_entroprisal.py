@@ -122,7 +122,8 @@ class TokenEntropisalCalculator:
     # Conditioning context lengths (number of preceding tokens), matching the n in
     # ngram_surprisal_n / ngram_entropy_n: n=1 is the bigram context, n=3 the 4-gram.
     # Entropy reduction needs to drop one context token, so it is defined for n in {2, 3};
-    # entropy difference is a plain next-word-entropy comparison, defined for n in {1,2,3}.
+    # surprisal and entropy difference are plain next-word comparisons, defined for n in {1,2,3}.
+    SURPRISAL_NS = (1, 2, 3)
     ENTROPY_REDUCTION_NS = (2, 3)
     ENTROPY_DIFFERENCE_NS = (1, 2, 3)
 
@@ -305,13 +306,15 @@ class TokenEntropisalCalculator:
         ent_{n} = H(W_t | n preceding tokens) comes from `_entropy_lookup[n]`; this serves
         both as Distribution B for entropy reduction and as the term differenced across
         positions for entropy difference. gap_{n} is the matching Distribution A from
-        `_gap_entropy_lookup[n]` (the n-1 tokens up to w_{t-2}). Surprisal uses the full
-        4-gram context (n=3). Unattested or out-of-range contexts produce nulls via left
-        joins (no backoff).
+        `_gap_entropy_lookup[n]` (the n-1 tokens up to w_{t-2}). Surprisal is looked up at
+        each context length (surprisal_{n} for n in SURPRISAL_NS); callers select the
+        desired n. Unattested or out-of-range contexts produce nulls via left joins (no
+        backoff).
 
-        Returns one row per position holding (all base 2): position, token, surprisal,
-        surprisal_available, ent_{n} for n in {1,2,3}, ent_prev_{n} (the previous position's
-        ent_{n}, for entropy difference), and gap_{n} for n in ENTROPY_REDUCTION_NS.
+        Returns one row per position holding (all base 2): position, token,
+        surprisal_{n} for n in SURPRISAL_NS, ent_{n} for n in {1,2,3}, ent_prev_{n} (the
+        previous position's ent_{n}, for entropy difference), and gap_{n} for n in
+        ENTROPY_REDUCTION_NS.
         """
         ent_ns = sorted(set(self.ENTROPY_DIFFERENCE_NS) | set(self.ENTROPY_REDUCTION_NS))
 
@@ -334,13 +337,14 @@ class TokenEntropisalCalculator:
 
         result = pl.DataFrame(rows, schema=schema)
 
-        # Surprisal from the full 4-gram context (n=3).
-        result = result.join(
-            self._surprisal_lookup[3],
-            left_on=["bkey_3", "token"],
-            right_on=["context_key", "target"],
-            how="left",
-        ).with_columns(pl.col("surprisal").is_not_null().alias("surprisal_available"))
+        # Surprisal at each context length: surprisal_{n} = -log2 P(w_t | n preceding tokens).
+        for n in self.SURPRISAL_NS:
+            result = result.join(
+                self._surprisal_lookup[n].rename({"surprisal": f"surprisal_{n}"}),
+                left_on=[f"bkey_{n}", "token"],
+                right_on=["context_key", "target"],
+                how="left",
+            )
 
         # Next-word entropy ent_{n} for each context length (Distribution B / difference term).
         for n in ent_ns:
@@ -391,9 +395,13 @@ class TokenEntropisalCalculator:
         df = self._compute_per_position(tokens)
         factor = self._base_factor(base)
 
-        derived = [(pl.col("surprisal") * factor).alias("surprisal")]
+        derived = []
         flags = []
         clip_targets = []
+
+        for n in self.SURPRISAL_NS:
+            derived.append((pl.col(f"surprisal_{n}") * factor).alias(f"surprisal_{n}"))
+            flags.append(pl.col(f"surprisal_{n}").is_not_null().alias(f"surprisal_{n}_available"))
 
         for n in self.ENTROPY_REDUCTION_NS:
             derived.append(
@@ -426,22 +434,36 @@ class TokenEntropisalCalculator:
 
         return df
 
-    def surprisal(self, tokens: List[str], *, base: float = 2.0) -> pd.DataFrame:
-        """Per-position surprisal: -log P(w_t | w_{t-3}, w_{t-2}, w_{t-1}).
+    def surprisal(self, tokens: List[str], *, n: int = 3, base: float = 2.0) -> pd.DataFrame:
+        """Per-position surprisal: -log P(w_t | n preceding tokens).
 
-        High when the observed word was unlikely given its preceding context. Uses the
-        full trigram context with no backoff: positions whose context is unattested (or
-        which lack three preceding tokens) get NA and surprisal_available == False.
+        High when the observed word was unlikely given its preceding context. No backoff
+        is applied: positions whose context is unattested (or which lack n preceding
+        tokens) get NA and surprisal_available == False.
+
+        - n=3 (default, 4-gram): -log P(w_t | w_{t-3}, w_{t-2}, w_{t-1}).
+        - n=2 (trigram):         -log P(w_t | w_{t-2}, w_{t-1}).
+        - n=1 (bigram):          -log P(w_t | w_{t-1}).
 
         Args:
             tokens: List of token strings (e.g. from preprocess_text(text)[0]).
+            n: Conditioning context length, 1, 2, or 3 (default 3).
             base: Logarithm base (default 2.0 for bits).
 
         Returns:
             DataFrame with columns: position, token, surprisal, surprisal_available.
         """
+        if n not in self.SURPRISAL_NS:
+            raise ValueError(f"n must be one of {self.SURPRISAL_NS}, got {n!r}")
         df = self._assemble(tokens, signed=True, base=base)
-        return df.select(["position", "token", "surprisal", "surprisal_available"]).to_pandas()
+        return df.select(
+            [
+                "position",
+                "token",
+                pl.col(f"surprisal_{n}").alias("surprisal"),
+                pl.col(f"surprisal_{n}_available").alias("surprisal_available"),
+            ]
+        ).to_pandas()
 
     def entropy_reduction(
         self, tokens: List[str], *, n: int = 3, signed: bool = False, base: float = 2.0
@@ -548,15 +570,15 @@ class TokenEntropisalCalculator:
             base: Logarithm base (default 2.0 for bits).
 
         Returns:
-            DataFrame with one row per token position: position, token, surprisal,
-            entropy_reduction_{2,3}, entropy_difference_{1,2,3}, and a matching
-            ``*_available`` flag for each metric.
+            DataFrame with one row per token position: position, token,
+            surprisal_{1,2,3}, entropy_reduction_{2,3}, entropy_difference_{1,2,3}, and a
+            matching ``*_available`` flag for each metric.
         """
         df = self._assemble(tokens, signed=signed, base=base)
-        metric_cols = ["surprisal"]
+        metric_cols = [f"surprisal_{n}" for n in self.SURPRISAL_NS]
         metric_cols += [f"entropy_reduction_{n}" for n in self.ENTROPY_REDUCTION_NS]
         metric_cols += [f"entropy_difference_{n}" for n in self.ENTROPY_DIFFERENCE_NS]
-        flag_cols = ["surprisal_available"]
+        flag_cols = [f"surprisal_{n}_available" for n in self.SURPRISAL_NS]
         flag_cols += [f"entropy_reduction_{n}_available" for n in self.ENTROPY_REDUCTION_NS]
         flag_cols += [f"entropy_difference_{n}_available" for n in self.ENTROPY_DIFFERENCE_NS]
         return df.select(["position", "token", *metric_cols, *flag_cols]).to_pandas()

@@ -12,6 +12,18 @@ Calculate information theoretic linguistic metrics on text using reference corpo
 
 These metrics are useful for analyzing text complexity, readability, and information content.
 
+### Metrics at a glance
+
+`n` denotes the conditioning context length (preceding tokens or characters for token / character calculators; prefix or suffix length for the rest-of-word calculator). Each cell lists the `n` values supported.
+
+| Calculator | Direction | Surprisal | Entropy | Entropy reduction | Entropy difference |
+|---|---|---|---|---|---|
+| `TokenEntropisalCalculator` | forward | n = 1, 2, 3 | n = 1, 2, 3 | n = 2, 3 | n = 1, 2, 3 |
+| `CharacterEntropisalCalculator` | forward | n = 1, 2, 3 | n = 1, 2, 3 | n = 2, 3 | n = 1, 2, 3 |
+| `RestOfWordEntropisalCalculator` | forward and backward | n = 1, 2, 3 | n = 1, 2, 3 | n = 1, 2, 3 | &mdash; |
+
+Entropy reduction at the lowest `n` requires dropping one context element; that's why it starts at `n=2` for token and character. The rest-of-word version goes down to `n=1` by using the marginal word entropy `H(W)` as the Distribution A baseline -- the reduction from observing the very first character.
+
 ## Installation
 
 ### Basic Installation
@@ -116,8 +128,10 @@ have a full context — yield `NaN` and a `False` availability flag (no backoff 
 ```python
 tokens = ["the", "quick", "brown", "fox"]
 
-# Surprisal: -log2 P(w_t | w_{t-3}, w_{t-2}, w_{t-1}), the information value of each token.
-calc.surprisal(tokens)
+# Surprisal: -log2 P(w_t | n preceding tokens), the information value of each token.
+# n=3 (default) uses the full 4-gram context; n=2 the trigram; n=1 the bigram.
+calc.surprisal(tokens)             # n=3 (4-gram)
+calc.surprisal(tokens, n=2)        # trigram
 # columns: position, token, surprisal, surprisal_available
 
 # Entropy reduction (Hale-style, conditional mutual information):
@@ -138,7 +152,8 @@ calc.entropy_difference(tokens, n=3)
 
 # Everything at once, at every context length (best for comparative analysis):
 calc.compute_all(tokens)
-# columns: position, token, surprisal,
+# columns: position, token,
+#          surprisal_1, surprisal_2, surprisal_3,
 #          entropy_reduction_2, entropy_reduction_3,
 #          entropy_difference_1, entropy_difference_2, entropy_difference_3,
 #          and a matching *_available flag for each metric
@@ -179,8 +194,10 @@ Per-position character metrics return a `pandas.DataFrame` with one row per targ
 character position within each boundary-padded word (`#word#`):
 
 ```python
-# Trigraph surprisal: -log2 P(c_i | c_{i-3}, c_{i-2}, c_{i-1}) per character.
-calc.surprisal(tokens)
+# Character surprisal: -log2 P(c_i | n preceding chars) per character.
+# n=3 (default) uses the trigraph context; n=2 the bigraph; n=1 the single-char.
+calc.surprisal(tokens)             # n=3 (trigraph)
+calc.surprisal(tokens, n=2)        # bigraph
 # columns: token_index, word, position, target, surprisal, surprisal_available
 
 # Entropy reduction (Hale-style, conditional mutual information) at the character
@@ -278,7 +295,7 @@ Calculate token-level entropy and surprisal metrics using n-gram frequencies.
 
 - `calculate_metrics(tokens: List[str]) -> Dict[str, float]`: Per-document mean metrics for a token list
 - `calculate_batch(token_lists: List[List[str]]) -> pd.DataFrame`: Batch processing
-- `surprisal(tokens, *, base=2.0) -> pd.DataFrame`: Per-position surprisal
+- `surprisal(tokens, *, n=3, base=2.0) -> pd.DataFrame`: Per-position surprisal (`n` in {1, 2, 3})
 - `entropy_reduction(tokens, *, n=3, signed=False, base=2.0) -> pd.DataFrame`: Per-position entropy reduction (conditional mutual information; `n` in {2, 3})
 - `entropy_difference(tokens, *, n=3, signed=False, base=2.0) -> pd.DataFrame`: Per-position entropy difference (Lowder-style; `n` in {1, 2, 3})
 - `compute_all(tokens, *, signed=False, base=2.0) -> pd.DataFrame`: All per-position metrics at every context length
@@ -292,7 +309,7 @@ Calculate character-level transition entropy and surprisal.
 
 - `calculate_metrics(tokens: List[str]) -> Dict[str, float]`: Per-document mean metrics for a token list
 - `calculate_batch(token_lists: List[List[str]]) -> pd.DataFrame`: Batch processing
-- `surprisal(tokens, *, base=2.0) -> pd.DataFrame`: Per-position trigraph surprisal
+- `surprisal(tokens, *, n=3, base=2.0) -> pd.DataFrame`: Per-position character surprisal (`n` in {1, 2, 3})
 - `entropy_reduction(tokens, *, n=3, signed=False, base=2.0) -> pd.DataFrame`: Per-position character entropy reduction (`n` in {2, 3})
 - `entropy_difference(tokens, *, n=3, signed=False, base=2.0) -> pd.DataFrame`: Per-position character entropy difference (`n` in {1, 2, 3})
 - `compute_all(tokens, *, signed=False, base=2.0) -> pd.DataFrame`: All per-position character metrics
