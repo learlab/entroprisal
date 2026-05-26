@@ -28,7 +28,7 @@ Example usage:
     >>> metrics = char_calc.calculate_metrics(tokens)
 """
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 from .character_entroprisal import CharacterEntropisalCalculator
 from .rest_of_word_entroprisal import RestOfWordEntropisalCalculator
