@@ -172,6 +172,27 @@ print(metrics)
 # - char_entropy, char_surprisal: Single character transition metrics
 # - bigraph_entropy, bigraph_surprisal: Two-character context metrics
 # - trigraph_entropy, trigraph_surprisal: Three-character context metrics
+# - char_entropy_reduction_{2,3}, char_entropy_difference_{1,2,3}: see below
+```
+
+Per-position character metrics return a `pandas.DataFrame` with one row per target
+character position within each boundary-padded word (`#word#`):
+
+```python
+# Trigraph surprisal: -log2 P(c_i | c_{i-3}, c_{i-2}, c_{i-1}) per character.
+calc.surprisal(tokens)
+# columns: token_index, word, position, target, surprisal, surprisal_available
+
+# Entropy reduction (Hale-style, conditional mutual information) at the character
+# level: H(c_i | c_{i-n}..c_{i-2}) - H(c_i | c_{i-n}..c_{i-1}). n=3 (default) is
+# the trigraph context; n=2 is the bigraph. Clipped at 0 by default.
+calc.entropy_reduction(tokens, n=3)
+
+# Entropy difference (Lowder-style) across char positions within a word.
+calc.entropy_difference(tokens, n=3)
+
+# Everything at once.
+calc.compute_all(tokens)
 ```
 
 ### Rest-of-Word Entropy and Surprisal (Character-Level, Bidirectional)
@@ -201,7 +222,30 @@ print(metrics)
 # - rl_c1_entropy, rl_c1_surprisal: Right-to-left, 1-char context
 # - rl_c2_entropy, rl_c2_surprisal: Right-to-left, 2-char context
 # - rl_c3_entropy, rl_c3_surprisal: Right-to-left, 3-char context
+# - {lr,rl}_entropy_reduction_{1,2,3}: see below
 # - mean_word_length
+```
+
+Per-word rest-of-word metrics expose per-token DataFrames parameterized by
+`direction` (`"lr"` or `"rl"`) and conditioning prefix length `n`:
+
+```python
+# Surprisal of the remaining characters given the n-char prefix/suffix.
+calc.surprisal(tokens, direction="lr", n=2)
+# columns: token_index, word, surprisal, surprisal_available
+
+# Entropy reduction: H(W | (n-1) chars) - H(W | n chars), the reduction in
+# uncertainty about word identity from observing one more character. n=1 uses
+# the corpus-wide marginal H(W) as the Distribution A baseline -- the reduction
+# from observing the very first character. This is the clean Hale-style
+# conditional mutual information, directly parallel to Hale (2016)'s original
+# parse-given-words formulation but with characters reducing uncertainty about
+# word identity. Clipped at 0 by default.
+calc.entropy_reduction(tokens, direction="lr", n=1)
+calc.entropy_reduction(tokens, direction="rl", n=2)
+
+# Both directions x all prefix lengths in one DataFrame.
+calc.compute_all(tokens)
 ```
 
 ### Batch Processing
@@ -246,8 +290,12 @@ Calculate character-level transition entropy and surprisal.
 
 **Methods:**
 
-- `calculate_metrics(tokens: List[str]) -> Dict[str, float]`: Calculate metrics for a token list
+- `calculate_metrics(tokens: List[str]) -> Dict[str, float]`: Per-document mean metrics for a token list
 - `calculate_batch(token_lists: List[List[str]]) -> pd.DataFrame`: Batch processing
+- `surprisal(tokens, *, base=2.0) -> pd.DataFrame`: Per-position trigraph surprisal
+- `entropy_reduction(tokens, *, n=3, signed=False, base=2.0) -> pd.DataFrame`: Per-position character entropy reduction (`n` in {2, 3})
+- `entropy_difference(tokens, *, n=3, signed=False, base=2.0) -> pd.DataFrame`: Per-position character entropy difference (`n` in {1, 2, 3})
+- `compute_all(tokens, *, signed=False, base=2.0) -> pd.DataFrame`: All per-position character metrics
 - `get_character_entropy(char: str) -> Optional[float]`: Lookup entropy for specific character
 - `get_character_surprisal(context: str, target: str) -> Optional[float]`: Lookup surprisal for character transition
 - `get_bigraph_entropy(bigraph: str) -> Optional[float]`: Lookup entropy for bigraph
@@ -261,9 +309,14 @@ Calculate character-level rest-of-word entropy and surprisal in both directions 
 
 **Methods:**
 
-- `calculate_metrics(tokens: List[str]) -> Dict[str, float]`: Calculate metrics for a token list
+- `calculate_metrics(tokens: List[str]) -> Dict[str, float]`: Per-document mean metrics for a token list
 - `calculate_batch(token_lists: List[List[str]]) -> pd.DataFrame`: Batch processing
+- `surprisal(tokens, *, direction="lr", n=2, base=2.0) -> pd.DataFrame`: Per-word rest-of-word surprisal
+- `entropy_reduction(tokens, *, direction="lr", n=2, signed=False, base=2.0) -> pd.DataFrame`: Per-word entropy reduction over word identity (`n` in {1, 2, 3}; `n=1` uses the marginal `H(W)` baseline)
+- `compute_all(tokens, *, signed=False, base=2.0) -> pd.DataFrame`: All per-word metrics, both directions
 - `get_word_frequency(word: str) -> int`: Get frequency of a word in reference corpus
+
+Attribute: `word_marginal_entropy` (float) — `H(W)` over the corpus, used as the Distribution A baseline for `entropy_reduction(..., n=1)`.
 
 ## Utilities
 
