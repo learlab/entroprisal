@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-29
+
+### Fixed
+- `preprocess_text` now keeps only alphabetic tokens (`token.is_alpha`) in the default (`content_words_only=False`) path, matching how the reference n-gram corpus was tokenized. Previously punctuation, whitespace, digits, and spaCy-split clitics (`n't`, `'s`) were retained — none of which exist in the reference vocabulary, so they inflated `n_tokens` and broke the n-gram contexts of adjacent real words. This aligns `n_tokens` with a true word count and improves metric coverage. Note: per-document metric values and `n_tokens` may change for inputs containing non-alphabetic tokens.
+
 ## [0.3.1] - 2026-05-20
 
 ### Changed

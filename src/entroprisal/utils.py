@@ -382,7 +382,7 @@ def preprocess_text(
     if content_words_only:
         tokens = [[token.lower_ for token in doc if is_content_token(token)] for doc in docs]
     else:
-        tokens = [[token.lower_ for token in doc] for doc in docs]
+        tokens = [[token.lower_ for token in doc if token.is_alpha] for doc in docs]
 
     return tokens
 
