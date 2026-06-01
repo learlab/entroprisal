@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-06-01
+
+### Fixed
+- `RestOfWordEntropisalCalculator` no longer emits degenerate `c2`/`c3` entropy and surprisal values for words too short to support the conditioning context. Because words are boundary-padded (`#word#`), the `(n+1)`-character context window for a token with fewer than `n` content characters overran into the opposite boundary, collapsing the predicted "rest" to `""` and producing a constant entropy 0 / surprisal 0. Concretely, every 1-character word (e.g. `a`, `i`) produced a spurious zero for `lr/rl_c2_*`, and every 2-character word (e.g. `to`, `of`, `is`) produced one for `lr/rl_c3_*`. `c_n` is now computed only when the token has at least `n` content characters (`len(padded_word) >= n + 2`); shorter words contribute nothing to the aggregate (absent from `*_support`) and yield `NaN` in the per-position `surprisal`/`entropy_reduction`/`compute_all` outputs (which also removes the degenerate term from per-position `entropy_reduction_2`/`entropy_reduction_3` at those positions). Note: aggregate `lr/rl_c2_entropy`, `lr/rl_c3_entropy`, and their surprisal counterparts may change for inputs containing 1- or 2-character words, since the spurious zeros are no longer averaged in.
+
 ## [0.5.0] - 2026-05-29
 
 ### Fixed

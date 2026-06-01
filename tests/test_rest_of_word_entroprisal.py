@@ -262,3 +262,57 @@ def test_calculate_metrics_preserves_existing_keys(sample_words):
     assert "lr_c1_entropy" in metrics
     assert "lr_c1_surprisal" in metrics
     assert "rl_c1_entropy" in metrics
+
+
+# ------------------------------------------- short-word boundary-overrun guards
+
+
+@pytest.fixture
+def short_corpus():
+    """Corpus with 1- and 2-character words to exercise the c2/c3 length guards."""
+    return pd.DataFrame(
+        {
+            "WORD": ["a", "an", "and", "cat", "cats"],
+            "COUNT": [100, 80, 60, 40, 20],
+        }
+    )
+
+
+def test_two_char_word_has_no_degenerate_c3(short_corpus):
+    """A 2-char word lacks a 3-content-char context, so c3 must not be built for it.
+
+    Previously "#an#" (the whole padded word) was stored as a c3 context mapping to an
+    empty rest, yielding a degenerate entropy 0 / surprisal 0.
+    """
+    calc = RestOfWordEntropisalCalculator(short_corpus)
+    # The degenerate full-word context is never a key, in either direction.
+    assert "#an#" not in calc.lr_c3_entropy_lookup
+    assert "#an#" not in calc.rl_c3_entropy_lookup
+    # A 2-char token contributes nothing to the c3 aggregates.
+    metrics = calc.calculate_metrics(["an"])
+    assert "lr_c3_entropy" not in metrics
+    assert "rl_c3_entropy" not in metrics
+    # Per-position c3 surprisal is NaN (no backoff), not a degenerate 0.
+    df = calc.compute_all(["an"])
+    assert math.isnan(df.iloc[0]["lr_surprisal_3"])
+    assert math.isnan(df.iloc[0]["rl_surprisal_3"])
+
+
+def test_one_char_word_has_no_degenerate_c2(short_corpus):
+    """A 1-char word lacks a 2-content-char context, so c2 must not be built for it."""
+    calc = RestOfWordEntropisalCalculator(short_corpus)
+    assert "#a#" not in calc.lr_c2_entropy_lookup
+    assert "#a#" not in calc.rl_c2_entropy_lookup
+    metrics = calc.calculate_metrics(["a"])
+    assert "lr_c2_entropy" not in metrics
+    assert "rl_c2_entropy" not in metrics
+
+
+def test_three_char_word_still_has_c3(short_corpus):
+    """Regression: a word with exactly 3 content chars keeps its (valid) c3 metric."""
+    calc = RestOfWordEntropisalCalculator(short_corpus)
+    # "#cat" is a genuine 3-char context (shared with "cats"), not the whole word.
+    assert "#cat" in calc.lr_c3_entropy_lookup
+    metrics = calc.calculate_metrics(["cat"])
+    assert "lr_c3_entropy" in metrics
+    assert "rl_c3_entropy" in metrics

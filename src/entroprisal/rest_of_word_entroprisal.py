@@ -112,24 +112,26 @@ class RestOfWordEntropisalCalculator:
             # Store word frequency
             self.word_frequencies[word] = freq
 
-            # Left-to-right: first n chars predict rest of word
-            # p("for#"|"#")
-            self.lr_c1[word[:2]][word[2:]] += freq
+            # `word` is boundary-padded ("#" + token + "#"), so a token with k content
+            # characters has len(word) == k + 2. The c_n context is the (n+1)-char
+            # prefix/suffix; for it to be the boundary plus n content characters, the
+            # token must have at least n content chars (len(word) >= n + 2).
 
-            # Right-to-left: last n chars predict rest of word
-            # p("#for"|"#")
+            # Left-to-right / right-to-left c1 (1 content char): always available.
+            # lr: p("for#" | "#");  rl: p("#for" | "#")
+            self.lr_c1[word[:2]][word[2:]] += freq
             self.rl_c1[word[-2:]][word[:-2]] += freq
 
-            # p("or#"|"#f")
-            self.lr_c2[word[:3]][word[3:]] += freq
-            # p("#fo"|"r#")
-            self.rl_c2[word[-3:]][word[:-3]] += freq
-
-            # Cannot be calculated for single-letter words like "#a#"
+            # c2 (2 content chars): need len(word) >= 4 (skip 1-char words like "#a#").
+            # lr: p("or#" | "#f");  rl: p("#fo" | "r#")
             if len(word) >= 4:
-                # p("r#"|"#fo")
+                self.lr_c2[word[:3]][word[3:]] += freq
+                self.rl_c2[word[-3:]][word[:-3]] += freq
+
+            # c3 (3 content chars): need len(word) >= 5 (skip 1- and 2-char words).
+            # lr: p("r#" | "#fo");  rl: p("#f" | "or#")
+            if len(word) >= 5:
                 self.lr_c3[word[:4]][word[4:]] += freq
-                # p("#f"|"or#")
                 self.rl_c3[word[-4:]][word[:-4]] += freq
 
     def _construct_entropy_lookups(self):
@@ -213,7 +215,11 @@ class RestOfWordEntropisalCalculator:
             word_lengths.append(len(word))
             word = self.BOUNDARY + word + self.BOUNDARY
 
-            # Left-to-right c1 (1 char context)
+            # Length guards mirror `_build_frequency_counters`: c_n requires a token
+            # with at least n content chars (len(word) >= n + 2), otherwise the context
+            # window overruns the opposite boundary and c_n is a degenerate 0.
+
+            # Left-to-right c1 (1 content char context); always available.
             if word[:2] in self.lr_c1_entropy_lookup:
                 lr_c1_entropies.append(self.lr_c1_entropy_lookup[word[:2]])
 
@@ -222,17 +228,18 @@ class RestOfWordEntropisalCalculator:
                 if rest in self.lr_c1_surprisal_lookup[word[:2]]:
                     lr_c1_surprisals.append(self.lr_c1_surprisal_lookup[word[:2]][rest])
 
-            # Left-to-right c2 (2 char context)
-            if word[:3] in self.lr_c2_entropy_lookup:
-                lr_c2_entropies.append(self.lr_c2_entropy_lookup[word[:3]])
-
-            if word[:3] in self.lr_c2_surprisal_lookup:
-                rest = word[3:]
-                if rest in self.lr_c2_surprisal_lookup[word[:3]]:
-                    lr_c2_surprisals.append(self.lr_c2_surprisal_lookup[word[:3]][rest])
-
-            # Left-to-right c3 (3 char context)
+            # Left-to-right c2 (2 content chars): need len(word) >= 4.
             if len(word) >= 4:
+                if word[:3] in self.lr_c2_entropy_lookup:
+                    lr_c2_entropies.append(self.lr_c2_entropy_lookup[word[:3]])
+
+                if word[:3] in self.lr_c2_surprisal_lookup:
+                    rest = word[3:]
+                    if rest in self.lr_c2_surprisal_lookup[word[:3]]:
+                        lr_c2_surprisals.append(self.lr_c2_surprisal_lookup[word[:3]][rest])
+
+            # Left-to-right c3 (3 content chars): need len(word) >= 5.
+            if len(word) >= 5:
                 if word[:4] in self.lr_c3_entropy_lookup:
                     lr_c3_entropies.append(self.lr_c3_entropy_lookup[word[:4]])
 
@@ -241,7 +248,7 @@ class RestOfWordEntropisalCalculator:
                     if rest in self.lr_c3_surprisal_lookup[word[:4]]:
                         lr_c3_surprisals.append(self.lr_c3_surprisal_lookup[word[:4]][rest])
 
-            # Right-to-left c1 (1 char context)
+            # Right-to-left c1 (1 content char context); always available.
             if word[-2:] in self.rl_c1_entropy_lookup:
                 rl_c1_entropies.append(self.rl_c1_entropy_lookup[word[-2:]])
 
@@ -250,17 +257,18 @@ class RestOfWordEntropisalCalculator:
                 if rest in self.rl_c1_surprisal_lookup[word[-2:]]:
                     rl_c1_surprisals.append(self.rl_c1_surprisal_lookup[word[-2:]][rest])
 
-            # Right-to-left c2 (2 char context)
-            if word[-3:] in self.rl_c2_entropy_lookup:
-                rl_c2_entropies.append(self.rl_c2_entropy_lookup[word[-3:]])
-
-            if word[-3:] in self.rl_c2_surprisal_lookup:
-                rest = word[:-3]
-                if rest in self.rl_c2_surprisal_lookup[word[-3:]]:
-                    rl_c2_surprisals.append(self.rl_c2_surprisal_lookup[word[-3:]][rest])
-
-            # Right-to-left c3 (3 char context)
+            # Right-to-left c2 (2 content chars): need len(word) >= 4.
             if len(word) >= 4:
+                if word[-3:] in self.rl_c2_entropy_lookup:
+                    rl_c2_entropies.append(self.rl_c2_entropy_lookup[word[-3:]])
+
+                if word[-3:] in self.rl_c2_surprisal_lookup:
+                    rest = word[:-3]
+                    if rest in self.rl_c2_surprisal_lookup[word[-3:]]:
+                        rl_c2_surprisals.append(self.rl_c2_surprisal_lookup[word[-3:]][rest])
+
+            # Right-to-left c3 (3 content chars): need len(word) >= 5.
+            if len(word) >= 5:
                 if word[-4:] in self.rl_c3_entropy_lookup:
                     rl_c3_entropies.append(self.rl_c3_entropy_lookup[word[-4:]])
 
