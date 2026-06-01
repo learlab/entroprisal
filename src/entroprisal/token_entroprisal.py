@@ -23,11 +23,8 @@ class TokenEntropisalCalculator:
     - Entropy: Uncertainty about the next token given context
 
     Attributes:
-        EOW: End-of-word marker
         min_frequency: Minimum frequency threshold for n-grams
     """
-
-    EOW = "_"
 
     def __init__(
         self,
