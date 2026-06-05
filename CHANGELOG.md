@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-06-05
+
+### Removed
+- **`entropy_difference_1` and `entropy_reduction_1`** (both token- and character-level) are no longer computed. `ENTROPY_DIFFERENCE_NS` and `ENTROPY_REDUCTION_NS` are now `(2, 3)`; the `*_1` keys, columns, and `_support` counts are dropped from `calculate_metrics` and `compute_all`, and `entropy_difference(..., n=1)` / `entropy_reduction(..., n=1)` now raise `ValueError`. Both n=1 cases are degenerate at the n=1 conditioning length:
+  - `entropy_difference_1`: within a word/sequence the position-to-position differences telescope to `E_1[first] − E_1[last]`; since the initial term (`H(unit | boundary)`, a corpus constant) is identical for every unit, the measure reduces to a negated, length-normalized function of the *final* unit's branching entropy. `char_entropy_difference_1` correlated r ≈ −1.00 with the word-final character's entropy (signed/unclipped) and carried a strong spurious word-length dependence.
+  - `entropy_reduction_1`: at n=1 the Distribution A baseline is the scalar marginal entropy, so the per-position reduction `H(unit) − H(unit | preceding)` averages to an exact affine function of the mean transitional entropy (`char_entropy_reduction_1 = marginal − char_entropy`, r = −1.00) — a sign-flipped, shifted copy of an existing metric rather than a distinct construct.
+
+  `entropy_difference_2/3` and `entropy_reduction_2/3` condition on longer contexts, do not collapse to a single-unit lookup, and are unaffected. The directional `{lr,rl}_entropy_reduction_1` metrics of `RestOfWordEntropisalCalculator` are intentionally left unchanged.
+
 ## [0.5.1] - 2026-06-01
 
 ### Fixed

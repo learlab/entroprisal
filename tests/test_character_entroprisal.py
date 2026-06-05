@@ -151,19 +151,15 @@ def test_compute_all_shape(crafted_words):
         "surprisal_1",
         "surprisal_2",
         "surprisal_3",
-        "entropy_reduction_1",
         "entropy_reduction_2",
         "entropy_reduction_3",
-        "entropy_difference_1",
         "entropy_difference_2",
         "entropy_difference_3",
         "surprisal_1_available",
         "surprisal_2_available",
         "surprisal_3_available",
-        "entropy_reduction_1_available",
         "entropy_reduction_2_available",
         "entropy_reduction_3_available",
-        "entropy_difference_1_available",
         "entropy_difference_2_available",
         "entropy_difference_3_available",
     ]
@@ -207,44 +203,14 @@ def test_entropy_reduction_n3(sample_words):
 
 
 def test_entropy_reduction_invalid_n(sample_words):
-    """Context lengths outside 1..3 are rejected for entropy reduction."""
+    """Entropy reduction supports only n in {2, 3}; others (incl. n=1) are rejected."""
     calc = CharacterEntropisalCalculator(sample_words)
     with pytest.raises(ValueError):
         calc.entropy_reduction(["the"], n=0)
     with pytest.raises(ValueError):
+        calc.entropy_reduction(["the"], n=1)
+    with pytest.raises(ValueError):
         calc.entropy_reduction(["the"], n=4)
-
-
-def test_entropy_reduction_n1_uses_marginal(crafted_words):
-    """n=1 entropy reduction = H(c) - H(c | c_{i-1}); a marginal-baseline MI.
-
-    crafted_words = {"ab", "ac", "ba", "bc"}, each count 1. Boundary-padded forms
-    "#ab#", "#ac#", "#ba#", "#bc#". For target at position 2 of "#ab#" (target='b'),
-    n=1 conditions on c_{i-1} = word[1] = 'a' (single-char context, not bigraph):
-      - transitions['a'] = {b:1, c:1, #:1}  (from "#ab#" i=1, "#ac#" i=1, "#ba#" i=2)
-      - H(c | 'a') = H({1, 1, 1}) = log2(3) ~ 1.585 bits.
-      - ER_1 = char_marginal_entropy - log2(3).
-    """
-    calc = CharacterEntropisalCalculator(crafted_words)
-    df = calc.entropy_reduction(["ab"], n=1, signed=True)
-    row = df[df["position"] == 2].iloc[0]
-    expected = calc.char_marginal_entropy - math.log2(3)
-    assert row["entropy_reduction"] == pytest.approx(expected)
-    assert bool(row["available"]) is True
-
-
-def test_entropy_reduction_n1_unavailable_at_position_one(sample_words):
-    """At position 1 (first char after boundary), n=1 needs c_{i-1}='#'.
-
-    Position 1's preceding char is the boundary '#'. H(target | '#') IS attested in
-    the lookup, so n=1 ER should be available at position 1 (the boundary is a real
-    context character). We check that the value is finite when attested.
-    """
-    calc = CharacterEntropisalCalculator(sample_words)
-    df = calc.entropy_reduction(["cat"], n=1)
-    row = df[df["position"] == 1].iloc[0]
-    assert bool(row["available"]) is True
-    assert not math.isnan(row["entropy_reduction"])
 
 
 def test_entropy_reduction_deterministic_is_zero(deterministic_words):
@@ -283,9 +249,9 @@ def test_entropy_reduction_unattested_is_na(sample_words):
 
 
 def test_entropy_difference_shift_within_word(crafted_words):
-    """entropy_difference shifts ent_n within a word; first scorable position is NaN."""
+    """entropy_difference shifts ent_n within a word; first position of each word is NaN."""
     calc = CharacterEntropisalCalculator(crafted_words)
-    df = calc.entropy_difference(["ab", "ba"], n=1, signed=True)
+    df = calc.entropy_difference(["ab", "ba"], n=2, signed=True)
 
     # Word "ab" -> "#ab#": position 1 has no predecessor -> NaN.
     first_of_word0 = df[(df["token_index"] == 0) & (df["position"] == 1)].iloc[0]
@@ -299,10 +265,12 @@ def test_entropy_difference_shift_within_word(crafted_words):
 
 
 def test_entropy_difference_invalid_n(sample_words):
-    """Context lengths outside 1..3 are rejected for entropy difference."""
+    """Entropy difference supports only n in {2, 3}; others (incl. n=1) are rejected."""
     calc = CharacterEntropisalCalculator(sample_words)
     with pytest.raises(ValueError):
         calc.entropy_difference(["the"], n=0)
+    with pytest.raises(ValueError):
+        calc.entropy_difference(["the"], n=1)
     with pytest.raises(ValueError):
         calc.entropy_difference(["the"], n=4)
 
@@ -327,7 +295,7 @@ def test_calculate_metrics_includes_new_keys(crafted_words):
 
     assert "char_entropy_reduction_2_support" in metrics
     assert "char_entropy_reduction_3_support" in metrics
-    assert "char_entropy_difference_1_support" in metrics
+    assert "char_entropy_difference_2_support" in metrics
     assert "char_entropy_difference_3_support" in metrics
     # At least one attested position for n=2 (target at pos 2 with '#a' bigraph).
     assert metrics["char_entropy_reduction_2_support"] >= 1

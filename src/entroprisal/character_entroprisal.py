@@ -32,12 +32,15 @@ class CharacterEntropisalCalculator:
     BOUNDARY = "#"
 
     # Conditioning context lengths matching the token-level convention: n is the number
-    # of preceding characters in the full distribution. All three metrics support
-    # n in {1, 2, 3}; entropy reduction at n=1 uses the marginal char entropy as
-    # Distribution A (the mutual information between adjacent characters).
+    # of preceding characters in the full distribution. Surprisal supports n in {1, 2, 3}.
+    # Entropy reduction and entropy difference support only n in {2, 3}. The n=1 cases are
+    # excluded as degenerate: entropy_reduction_1 = H(c) - H(c | c_{i-1}) is an exact
+    # affine function of `char_entropy` (the mean transitional entropy), and the n=1
+    # entropy difference telescopes within a word to a length-confounded function of the
+    # word-final character's entropy -- neither is a distinct construct.
     SURPRISAL_NS = (1, 2, 3)
-    ENTROPY_REDUCTION_NS = (1, 2, 3)
-    ENTROPY_DIFFERENCE_NS = (1, 2, 3)
+    ENTROPY_REDUCTION_NS = (2, 3)
+    ENTROPY_DIFFERENCE_NS = (2, 3)
 
     def __init__(
         self,
@@ -200,10 +203,10 @@ class CharacterEntropisalCalculator:
                 - bigraph_surprisal: Mean surprisal for bigraph contexts
                 - trigraph_entropy: Mean entropy for trigraph contexts
                 - trigraph_surprisal: Mean surprisal for trigraph contexts
-                - char_entropy_reduction_{1,2,3}: Mean conditional-mutual-information
+                - char_entropy_reduction_{2,3}: Mean conditional-mutual-information
                   reduction (clipped) over attested positions, by conditioning
                   context length n; see `entropy_reduction`
-                - char_entropy_difference_{1,2,3}: Mean Lowder-style entropy
+                - char_entropy_difference_{2,3}: Mean Lowder-style entropy
                   difference (clipped) over attested positions; see `entropy_difference`
                 - *_support: Number of positions contributing to each mean
 
@@ -426,10 +429,7 @@ class CharacterEntropisalCalculator:
                     prev_ent[n] = ent
 
                 # Gap (Distribution A) entropy at each entropy-reduction context length.
-                # n=1's Distribution A is the scalar marginal entropy, handled in _assemble.
                 for n in self.ENTROPY_REDUCTION_NS:
-                    if n == 1:
-                        continue
                     akey = word[i - n : i - 1] if i >= n else None
                     row[f"gap_{n}"] = self._lookup_gap_entropy(n, akey)
 
@@ -448,8 +448,6 @@ class CharacterEntropisalCalculator:
             columns.append(f"ent_{n}")
             columns.append(f"ent_prev_{n}")
         for n in self.ENTROPY_REDUCTION_NS:
-            if n == 1:
-                continue
             columns.append(f"gap_{n}")
 
         if not rows:
@@ -475,18 +473,11 @@ class CharacterEntropisalCalculator:
             df[f"surprisal_{n}_available"] = df[f"surprisal_{n}"].notna()
 
         clip_targets = []
-        marginal_scaled = self.char_marginal_entropy * factor
 
         for n in self.ENTROPY_REDUCTION_NS:
             col = f"entropy_reduction_{n}"
-            if n == 1:
-                # Distribution A is the corpus-wide marginal H(c) (a scalar). The
-                # reduction is the mutual information between c_i and c_{i-1}.
-                df[col] = marginal_scaled - df[f"ent_{n}"]
-                df[f"{col}_available"] = df[f"ent_{n}"].notna()
-            else:
-                df[col] = (df[f"gap_{n}"] - df[f"ent_{n}"]) * factor
-                df[f"{col}_available"] = df[f"gap_{n}"].notna() & df[f"ent_{n}"].notna()
+            df[col] = (df[f"gap_{n}"] - df[f"ent_{n}"]) * factor
+            df[f"{col}_available"] = df[f"gap_{n}"].notna() & df[f"ent_{n}"].notna()
             clip_targets.append(col)
 
         for n in self.ENTROPY_DIFFERENCE_NS:
@@ -555,9 +546,10 @@ class CharacterEntropisalCalculator:
 
         - n=3 (default, trigraph): H(c_i | c_{i-3}, c_{i-2}) - H(c_i | c_{i-3..i-1}).
         - n=2 (bigraph):            H(c_i | c_{i-2})         - H(c_i | c_{i-2}, c_{i-1}).
-        - n=1 (single-char):        H(c_i)                   - H(c_i | c_{i-1}).
-          Distribution A is the marginal character entropy; collapses to the mutual
-          information I(c_i; c_{i-1}) between adjacent characters.
+
+        n=1 is unsupported: H(c_i) - H(c_i | c_{i-1}) uses the scalar marginal as
+        Distribution A, which makes the per-word mean an exact affine function of
+        `char_entropy` (the mean transitional entropy) rather than a distinct construct.
 
         This is the character-level counterpart of `TokenEntropisalCalculator.entropy_reduction`.
         Distribution A pools across more continuations than Distribution B, so when the
@@ -566,9 +558,9 @@ class CharacterEntropisalCalculator:
 
         Args:
             tokens: List of token strings.
-            n: Conditioning context length, 1 (single-char), 2 (bigraph), or 3
-                (trigraph, default). n=1 uses the marginal char entropy as Distribution
-                A; n>=2 drops the most recent context char and marginalizes over it.
+            n: Conditioning context length, 2 (bigraph) or 3 (trigraph, default).
+                Drops the most recent context char and marginalizes over it. n=1 is
+                unsupported (it reduces to an affine function of `char_entropy`).
             signed: If False (default), return max(reduction, 0). If True, return the
                 signed value (negative means the new context broadened expectations).
             base: Logarithm base (default 2.0 for bits).
@@ -615,8 +607,9 @@ class CharacterEntropisalCalculator:
 
         Args:
             tokens: List of token strings.
-            n: Conditioning context length, 1 (single-char), 2 (bigraph), or 3
-                (trigraph, default).
+            n: Conditioning context length, 2 (bigraph) or 3 (trigraph, default).
+                n=1 is unsupported: its within-word differences telescope to a function
+                of the final character's entropy (a length-confounded restatement).
             signed: If False (default), return max(difference, 0). If True, return the
                 signed value.
             base: Logarithm base (default 2.0 for bits).
@@ -661,8 +654,8 @@ class CharacterEntropisalCalculator:
 
         Returns:
             DataFrame with one row per target character position: token_index, word,
-            position, target, surprisal_{1,2,3}, entropy_reduction_{1,2,3},
-            entropy_difference_{1,2,3}, and a matching ``*_available`` flag for each
+            position, target, surprisal_{1,2,3}, entropy_reduction_{2,3},
+            entropy_difference_{2,3}, and a matching ``*_available`` flag for each
             metric.
         """
         df = self._assemble(tokens, signed=signed, base=base)

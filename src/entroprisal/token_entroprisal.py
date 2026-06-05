@@ -119,12 +119,15 @@ class TokenEntropisalCalculator:
 
     # Conditioning context lengths (number of preceding tokens), matching the n in
     # ngram_surprisal_n / ngram_entropy_n: n=1 is the bigram context, n=3 the 4-gram.
-    # All three metrics support n in {1, 2, 3}. Entropy reduction at n=1 uses the
-    # marginal token entropy H(W_t) as Distribution A (the mutual information between
-    # adjacent tokens); n>=2 drops one context token and marginalizes over it.
+    # Surprisal supports n in {1, 2, 3}. Entropy reduction and entropy difference support
+    # only n in {2, 3}. The n=1 cases are excluded as degenerate: entropy_reduction_1 =
+    # H(W_t) - H(W_t | w_{t-1}) uses the scalar marginal as Distribution A, making it an
+    # affine function of the mean transitional entropy, and the n=1 entropy difference
+    # telescopes within a sequence to a length-confounded function of the final token's
+    # entropy -- neither is a distinct construct.
     SURPRISAL_NS = (1, 2, 3)
-    ENTROPY_REDUCTION_NS = (1, 2, 3)
-    ENTROPY_DIFFERENCE_NS = (1, 2, 3)
+    ENTROPY_REDUCTION_NS = (2, 3)
+    ENTROPY_DIFFERENCE_NS = (2, 3)
 
     @staticmethod
     def _gap_context_cols(n: int) -> List[str]:
@@ -144,17 +147,12 @@ class TokenEntropisalCalculator:
         marginalization, and is far cheaper than the weighted-sum formula given the
         count-table structure. The matching Distribution B is `_entropy_lookup[n]`.
 
-        n=1 is handled separately by `_build_marginal_entropy` since the gap context is
-        empty (the marginal H(W_t) applies to every position, so a scalar suffices).
-
         No smoothing is applied (raw MLE over the min_frequency-filtered table), so A and
         B are both unsmoothed. Entropies are stored in base 2; callers rescale for other
         bases.
         """
         self._gap_entropy_lookup = {}
         for n in self.ENTROPY_REDUCTION_NS:
-            if n == 1:
-                continue  # marginal handled in _build_marginal_entropy
             context_cols = self._gap_context_cols(n)
 
             if len(context_cols) == 1:
@@ -276,10 +274,10 @@ class TokenEntropisalCalculator:
                 - ngram_surprisal_{1,2,3}_support: Number of n-grams with coverage
                 - ngram_entropy_{1,2,3}: Mean entropy for each n-gram order
                 - ngram_entropy_{1,2,3}_support: Number of contexts with coverage
-                - entropy_reduction_{1,2,3}: Mean conditional-mutual-information reduction
+                - entropy_reduction_{2,3}: Mean conditional-mutual-information reduction
                   (clipped) over attested positions, by conditioning context length n
                   (n=3 is the 4-gram); see `entropy_reduction`
-                - entropy_difference_{1,2,3}: Mean Lowder-style entropy difference
+                - entropy_difference_{2,3}: Mean Lowder-style entropy difference
                   (clipped) over attested positions, by context length n; see
                   `entropy_difference`
                 - entropy_reduction_{n}_support / entropy_difference_{n}_support: Number of
@@ -337,32 +335,30 @@ class TokenEntropisalCalculator:
         backoff).
 
         Returns one row per position holding (all base 2): position, token,
-        surprisal_{n} for n in SURPRISAL_NS, ent_{n} for n in {1,2,3}, ent_prev_{n} (the
-        previous position's ent_{n}, for entropy difference), and gap_{n} for n in
-        ENTROPY_REDUCTION_NS.
+        surprisal_{n} for n in SURPRISAL_NS, ent_{n} for the entropy-reduction/difference
+        context lengths, ent_prev_{n} (the previous position's ent_{n}, for entropy
+        difference), and gap_{n} for n in ENTROPY_REDUCTION_NS.
         """
         ent_ns = sorted(set(self.ENTROPY_DIFFERENCE_NS) | set(self.ENTROPY_REDUCTION_NS))
+        # bkey (full n-token context) is consumed by the surprisal joins as well as the
+        # entropy joins, so build it for the union of those context lengths.
+        bkey_ns = sorted(set(self.SURPRISAL_NS) | set(ent_ns))
 
         rows = []
         for t, tok in enumerate(tokens):
             row = {"position": t, "token": tok}
-            # Full-context key for each entropy length n (n preceding tokens ending at t-1).
-            for n in ent_ns:
+            # Full-context key for each context length n (n preceding tokens ending at t-1).
+            for n in bkey_ns:
                 row[f"bkey_{n}"] = "|||".join(tokens[t - n : t]) if t >= n else None
-            # Distribution A (gappy) key: n-1 tokens ending at w_{t-2}. n=1's Distribution
-            # A is the scalar marginal entropy, so no key is needed.
+            # Distribution A (gappy) key: n-1 tokens ending at w_{t-2}.
             for n in self.ENTROPY_REDUCTION_NS:
-                if n == 1:
-                    continue
                 row[f"akey_{n}"] = "|||".join(tokens[t - n : t - 1]) if t >= n else None
             rows.append(row)
 
         schema = {"position": pl.Int64, "token": pl.Utf8}
-        for n in ent_ns:
+        for n in bkey_ns:
             schema[f"bkey_{n}"] = pl.Utf8
         for n in self.ENTROPY_REDUCTION_NS:
-            if n == 1:
-                continue
             schema[f"akey_{n}"] = pl.Utf8
 
         result = pl.DataFrame(rows, schema=schema)
@@ -386,10 +382,7 @@ class TokenEntropisalCalculator:
             )
 
         # Distribution A (gappy) entropy for each entropy-reduction context length.
-        # n=1 is handled in _assemble using the scalar token_marginal_entropy.
         for n in self.ENTROPY_REDUCTION_NS:
-            if n == 1:
-                continue
             result = result.join(
                 self._gap_entropy_lookup[n].rename({"gap_entropy": f"gap_{n}"}),
                 left_on=f"akey_{n}",
@@ -436,29 +429,17 @@ class TokenEntropisalCalculator:
             derived.append((pl.col(f"surprisal_{n}") * factor).alias(f"surprisal_{n}"))
             flags.append(pl.col(f"surprisal_{n}").is_not_null().alias(f"surprisal_{n}_available"))
 
-        marginal_scaled = self.token_marginal_entropy * factor
-
         for n in self.ENTROPY_REDUCTION_NS:
-            if n == 1:
-                # Distribution A is the corpus-wide marginal H(W_t) (a scalar). The
-                # reduction is the mutual information between w_t and w_{t-1}.
-                derived.append(
-                    (pl.lit(marginal_scaled) - pl.col(f"ent_{n}")).alias(f"entropy_reduction_{n}")
+            derived.append(
+                ((pl.col(f"gap_{n}") - pl.col(f"ent_{n}")) * factor).alias(
+                    f"entropy_reduction_{n}"
                 )
-                flags.append(
-                    pl.col(f"ent_{n}").is_not_null().alias(f"entropy_reduction_{n}_available")
+            )
+            flags.append(
+                (pl.col(f"gap_{n}").is_not_null() & pl.col(f"ent_{n}").is_not_null()).alias(
+                    f"entropy_reduction_{n}_available"
                 )
-            else:
-                derived.append(
-                    ((pl.col(f"gap_{n}") - pl.col(f"ent_{n}")) * factor).alias(
-                        f"entropy_reduction_{n}"
-                    )
-                )
-                flags.append(
-                    (pl.col(f"gap_{n}").is_not_null() & pl.col(f"ent_{n}").is_not_null()).alias(
-                        f"entropy_reduction_{n}_available"
-                    )
-                )
+            )
             clip_targets.append(f"entropy_reduction_{n}")
 
         for n in self.ENTROPY_DIFFERENCE_NS:
@@ -523,9 +504,10 @@ class TokenEntropisalCalculator:
 
         - n=3 (default, the 4-gram): H(W_t | w_{t-3}, w_{t-2}) - H(W_t | w_{t-3..t-1}).
         - n=2 (the trigram):         H(W_t | w_{t-2})         - H(W_t | w_{t-2}, w_{t-1}).
-        - n=1 (the bigram):          H(W_t)                   - H(W_t | w_{t-1}).
-          Distribution A is the marginal token entropy; this collapses to the mutual
-          information I(W_t; w_{t-1}) between adjacent tokens.
+
+        n=1 is unsupported: H(W_t) - H(W_t | w_{t-1}) uses the scalar marginal as
+        Distribution A, making the per-sequence mean an affine function of the mean
+        transitional entropy rather than a distinct construct.
 
         This is the pointwise conditional mutual information I(W_{t-1}; W_t | earlier
         context) and has the clean H(X) - H(X|y) form Hale (2016) describes, restricted to
@@ -536,9 +518,9 @@ class TokenEntropisalCalculator:
 
         Args:
             tokens: List of token strings.
-            n: Conditioning context length, 1 (bigram), 2 (trigram), or 3 (4-gram,
-                default). n=1 uses the marginal token entropy as Distribution A; n>=2
-                drops the most recent context token and marginalizes over it.
+            n: Conditioning context length, 2 (trigram) or 3 (4-gram, default). Drops the
+                most recent context token and marginalizes over it. n=1 is unsupported
+                (it reduces to an affine function of the mean transitional entropy).
             signed: If False (default), return max(reduction, 0) per Hale's convention.
                 If True, return the signed value (negative means the new context
                 broadened the expectation space).
@@ -570,8 +552,7 @@ class TokenEntropisalCalculator:
         For conditioning context length ``n``, computes E_n[t-1] - E_n[t], where
         E_n[t] = H(W_t | w_{t-n}..w_{t-1}) is the next-word entropy at position t. n=3
         (the 4-gram) reproduces the original Lowder definition
-        H(W_{t-1} | w_{t-4..t-2}) - H(W_t | w_{t-3..t-1}); n=1 is the simplest token-token
-        (bigram) form.
+        H(W_{t-1} | w_{t-4..t-2}) - H(W_t | w_{t-3..t-1}); n=2 uses the trigram context.
 
         This corresponds to the quantity Lowder et al. (2018) termed "entropy reduction".
         Note that it differences entropies over distinct random variables (guesses at
@@ -583,8 +564,9 @@ class TokenEntropisalCalculator:
 
         Args:
             tokens: List of token strings.
-            n: Conditioning context length, 1 (bigram), 2 (trigram), or 3 (4-gram,
-                default).
+            n: Conditioning context length, 2 (trigram) or 3 (4-gram, default).
+                n=1 is unsupported: its within-sequence differences telescope to a
+                function of the final token's entropy (a length-confounded restatement).
             signed: If False (default), return max(difference, 0). If True, return the
                 signed value.
             base: Logarithm base (default 2.0 for bits).
@@ -622,7 +604,7 @@ class TokenEntropisalCalculator:
 
         Returns:
             DataFrame with one row per token position: position, token,
-            surprisal_{1,2,3}, entropy_reduction_{1,2,3}, entropy_difference_{1,2,3}, and a
+            surprisal_{1,2,3}, entropy_reduction_{2,3}, entropy_difference_{2,3}, and a
             matching ``*_available`` flag for each metric.
         """
         df = self._assemble(tokens, signed=signed, base=base)
