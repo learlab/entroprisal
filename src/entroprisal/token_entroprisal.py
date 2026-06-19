@@ -6,7 +6,7 @@ from reference corpora. It uses pre-computed transition matrices for efficient b
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Union, cast
+from typing import Dict, List, Optional, Union, cast
 
 import numpy as np
 import pandas as pd
@@ -313,14 +313,208 @@ class TokenEntropisalCalculator:
     def calculate_batch(self, token_lists: List[List[str]]) -> pd.DataFrame:
         """Calculate metrics for multiple token sequences.
 
+        Vectorised equivalent of calling `calculate_metrics` on each sequence: the whole
+        corpus is assembled into a single per-position table and joined against each lookup
+        once, instead of re-joining per document. Results are identical up to
+        floating-point summation order.
+
         Args:
             token_lists: List of token lists
 
         Returns:
             DataFrame with one row per input sequence and columns for each metric
         """
-        results = [self.calculate_metrics(tokens) for tokens in token_lists]
-        return pd.DataFrame(results)
+        if not token_lists:
+            return pd.DataFrame()
+
+        # ngram_surprisal / ngram_entropy are reported for every surprisal context length
+        # (matching the per-document `_calculate_ngram_metrics` loop over range(1, 4)).
+        ngram_ns = self.SURPRISAL_NS
+        # bkey context lengths needed across all joins; entropy is joined for the ngram
+        # orders plus any extra needed by reduction / difference.
+        entropy_ns = sorted(
+            set(ngram_ns) | set(self.ENTROPY_REDUCTION_NS) | set(self.ENTROPY_DIFFERENCE_NS)
+        )
+        bkey_ns = sorted(set(self.SURPRISAL_NS) | set(entropy_ns))
+
+        rows = []
+        for doc, tokens in enumerate(token_lists):
+            rows.extend(self._position_key_rows(tokens, bkey_ns=bkey_ns, doc=doc))
+
+        n_docs = len(token_lists)
+        n_tokens = np.array([len(t) for t in token_lists], dtype=float)
+        mean_token_length = np.array(
+            [float(np.mean([len(w) for w in t])) if t else np.nan for t in token_lists]
+        )
+
+        if rows:
+            positions = pl.DataFrame(
+                rows, schema=self._position_schema(bkey_ns, with_doc=True)
+            )
+            positions = self._apply_lookup_joins(positions, entropy_ns=entropy_ns)
+
+            # Previous position's next-word entropy, within each document, for difference.
+            positions = positions.sort(["doc", "position"]).with_columns(
+                [
+                    pl.col(f"ent_{n}").shift(1).over("doc").alias(f"ent_prev_{n}")
+                    for n in self.ENTROPY_DIFFERENCE_NS
+                ]
+            )
+
+            # Per-position reduction / difference (null where unattested), then clip at 0
+            # (base 2, signed=False -- matching calculate_metrics).
+            derived = [
+                (pl.col(f"gap_{n}") - pl.col(f"ent_{n}")).alias(f"entropy_reduction_{n}")
+                for n in self.ENTROPY_REDUCTION_NS
+            ]
+            derived += [
+                (pl.col(f"ent_prev_{n}") - pl.col(f"ent_{n}")).alias(f"entropy_difference_{n}")
+                for n in self.ENTROPY_DIFFERENCE_NS
+            ]
+            positions = positions.with_columns(derived)
+            positions = positions.with_columns(
+                [self._clip_nonnegative(f"entropy_reduction_{n}") for n in self.ENTROPY_REDUCTION_NS]
+                + [
+                    self._clip_nonnegative(f"entropy_difference_{n}")
+                    for n in self.ENTROPY_DIFFERENCE_NS
+                ]
+            )
+
+            # Aggregate to one row per document. mean() skips nulls; support counts the
+            # attested (non-null) positions, matching the per-document means / supports.
+            agg = []
+            for n in ngram_ns:
+                agg.append(
+                    pl.col(f"surprisal_{n}").is_not_null().sum().alias(f"ngram_surprisal_{n}_support")
+                )
+                agg.append(pl.col(f"surprisal_{n}").mean().alias(f"ngram_surprisal_{n}"))
+                agg.append(
+                    pl.col(f"ent_{n}").is_not_null().sum().alias(f"ngram_entropy_{n}_support")
+                )
+                agg.append(pl.col(f"ent_{n}").mean().alias(f"ngram_entropy_{n}"))
+            for n in self.ENTROPY_REDUCTION_NS:
+                agg.append(
+                    pl.col(f"entropy_reduction_{n}")
+                    .is_not_null()
+                    .sum()
+                    .alias(f"entropy_reduction_{n}_support")
+                )
+                agg.append(pl.col(f"entropy_reduction_{n}").mean().alias(f"entropy_reduction_{n}"))
+            for n in self.ENTROPY_DIFFERENCE_NS:
+                agg.append(
+                    pl.col(f"entropy_difference_{n}")
+                    .is_not_null()
+                    .sum()
+                    .alias(f"entropy_difference_{n}_support")
+                )
+                agg.append(
+                    pl.col(f"entropy_difference_{n}").mean().alias(f"entropy_difference_{n}")
+                )
+
+            per_doc = (
+                positions.group_by("doc").agg(agg).sort("doc").to_pandas().set_index("doc")
+            )
+        else:
+            per_doc = pd.DataFrame()
+
+        # Reindex to every document (those with no scorable positions are absent above).
+        per_doc = per_doc.reindex(range(n_docs))
+
+        out = pd.DataFrame(index=range(n_docs))
+        out["n_tokens"] = n_tokens.astype(int)
+        out["mean_token_length"] = mean_token_length
+        for col in per_doc.columns:
+            out[col] = per_doc[col].to_numpy()
+
+        # Match per-document edge behaviour:
+        #  - ngram_surprisal_{n} / ngram_entropy_{n} (+ support) are absent when a sequence
+        #    has no n-gram of that order (len(tokens) <= n) -> NaN.
+        for n in ngram_ns:
+            short = n_tokens <= n
+            out.loc[short, [f"ngram_surprisal_{n}_support", f"ngram_surprisal_{n}"]] = np.nan
+            out.loc[short, [f"ngram_entropy_{n}_support", f"ngram_entropy_{n}"]] = np.nan
+        #  - entropy_reduction / entropy_difference supports are always reported (0 when no
+        #    position is scorable), so fill the reindexed (position-less) docs with 0.
+        for n in self.ENTROPY_REDUCTION_NS:
+            out[f"entropy_reduction_{n}_support"] = out[f"entropy_reduction_{n}_support"].fillna(0)
+        for n in self.ENTROPY_DIFFERENCE_NS:
+            out[f"entropy_difference_{n}_support"] = out[f"entropy_difference_{n}_support"].fillna(0)
+
+        return out.reset_index(drop=True)
+
+    def _position_schema(self, bkey_ns: List[int], *, with_doc: bool) -> Dict[str, "pl.DataType"]:
+        """Polars schema for a per-position key table (see `_position_key_rows`)."""
+        schema: Dict[str, "pl.DataType"] = {}
+        if with_doc:
+            schema["doc"] = pl.Int64
+        schema["position"] = pl.Int64
+        schema["token"] = pl.Utf8
+        for n in bkey_ns:
+            schema[f"bkey_{n}"] = pl.Utf8
+        for n in self.ENTROPY_REDUCTION_NS:
+            schema[f"akey_{n}"] = pl.Utf8
+        return schema
+
+    def _position_key_rows(
+        self, tokens: List[str], *, bkey_ns: List[int], doc: Optional[int] = None
+    ) -> List[dict]:
+        """Build per-position context-key rows for one token sequence.
+
+        Each row carries, for the given context lengths, the full-context key
+        bkey_{n} (n preceding tokens ending at w_{t-1}) and the gappy Distribution-A key
+        akey_{n} (the n-1 tokens ending at w_{t-2}). `doc`, when given, tags every row with
+        the sequence index so multiple sequences can share one table.
+        """
+        rows = []
+        for t, tok in enumerate(tokens):
+            row: Dict[str, object] = {}
+            if doc is not None:
+                row["doc"] = doc
+            row["position"] = t
+            row["token"] = tok
+            # Full-context key for each context length n (n preceding tokens ending at t-1).
+            for n in bkey_ns:
+                row[f"bkey_{n}"] = "|||".join(tokens[t - n : t]) if t >= n else None
+            # Distribution A (gappy) key: n-1 tokens ending at w_{t-2}.
+            for n in self.ENTROPY_REDUCTION_NS:
+                row[f"akey_{n}"] = "|||".join(tokens[t - n : t - 1]) if t >= n else None
+            rows.append(row)
+        return rows
+
+    def _apply_lookup_joins(self, result: pl.DataFrame, *, entropy_ns: List[int]) -> pl.DataFrame:
+        """Left-join surprisal, next-word entropy, and gappy entropy onto a key table.
+
+        `result` must carry bkey_{n} / akey_{n} / token columns (see `_position_key_rows`).
+        Unattested or out-of-range contexts produce nulls (no backoff). `entropy_ns`
+        selects which next-word entropies (ent_{n}) to attach.
+        """
+        # Surprisal at each context length: surprisal_{n} = -log2 P(w_t | n preceding tokens).
+        for n in self.SURPRISAL_NS:
+            result = result.join(
+                self._surprisal_lookup[n].rename({"surprisal": f"surprisal_{n}"}),
+                left_on=[f"bkey_{n}", "token"],
+                right_on=["context_key", "target"],
+                how="left",
+            )
+
+        # Next-word entropy ent_{n} (Distribution B / ngram entropy / difference term).
+        for n in entropy_ns:
+            result = result.join(
+                self._entropy_lookup[n].rename({"entropy": f"ent_{n}"}),
+                left_on=f"bkey_{n}",
+                right_on="context_key",
+                how="left",
+            )
+
+        # Distribution A (gappy) entropy for each entropy-reduction context length.
+        for n in self.ENTROPY_REDUCTION_NS:
+            result = result.join(
+                self._gap_entropy_lookup[n].rename({"gap_entropy": f"gap_{n}"}),
+                left_on=f"akey_{n}",
+                right_on="context_key",
+                how="left",
+            )
+        return result
 
     def _compute_per_position(self, tokens: List[str]) -> pl.DataFrame:
         """Build the raw per-position table (base-2, unclipped) with availability flags.
@@ -344,51 +538,9 @@ class TokenEntropisalCalculator:
         # entropy joins, so build it for the union of those context lengths.
         bkey_ns = sorted(set(self.SURPRISAL_NS) | set(ent_ns))
 
-        rows = []
-        for t, tok in enumerate(tokens):
-            row = {"position": t, "token": tok}
-            # Full-context key for each context length n (n preceding tokens ending at t-1).
-            for n in bkey_ns:
-                row[f"bkey_{n}"] = "|||".join(tokens[t - n : t]) if t >= n else None
-            # Distribution A (gappy) key: n-1 tokens ending at w_{t-2}.
-            for n in self.ENTROPY_REDUCTION_NS:
-                row[f"akey_{n}"] = "|||".join(tokens[t - n : t - 1]) if t >= n else None
-            rows.append(row)
-
-        schema = {"position": pl.Int64, "token": pl.Utf8}
-        for n in bkey_ns:
-            schema[f"bkey_{n}"] = pl.Utf8
-        for n in self.ENTROPY_REDUCTION_NS:
-            schema[f"akey_{n}"] = pl.Utf8
-
-        result = pl.DataFrame(rows, schema=schema)
-
-        # Surprisal at each context length: surprisal_{n} = -log2 P(w_t | n preceding tokens).
-        for n in self.SURPRISAL_NS:
-            result = result.join(
-                self._surprisal_lookup[n].rename({"surprisal": f"surprisal_{n}"}),
-                left_on=[f"bkey_{n}", "token"],
-                right_on=["context_key", "target"],
-                how="left",
-            )
-
-        # Next-word entropy ent_{n} for each context length (Distribution B / difference term).
-        for n in ent_ns:
-            result = result.join(
-                self._entropy_lookup[n].rename({"entropy": f"ent_{n}"}),
-                left_on=f"bkey_{n}",
-                right_on="context_key",
-                how="left",
-            )
-
-        # Distribution A (gappy) entropy for each entropy-reduction context length.
-        for n in self.ENTROPY_REDUCTION_NS:
-            result = result.join(
-                self._gap_entropy_lookup[n].rename({"gap_entropy": f"gap_{n}"}),
-                left_on=f"akey_{n}",
-                right_on="context_key",
-                how="left",
-            )
+        rows = self._position_key_rows(tokens, bkey_ns=bkey_ns)
+        result = pl.DataFrame(rows, schema=self._position_schema(bkey_ns, with_doc=False))
+        result = self._apply_lookup_joins(result, entropy_ns=ent_ns)
 
         # Previous position's next-word entropy at each length, for entropy_difference.
         result = result.sort("position").with_columns(
