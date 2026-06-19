@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-06-19
+
+### Changed
+- **Default `min_frequency` lowered from 100 to 5** for `TokenEntropisalCalculator`. The previous default of 100 discarded the long tail of attested n-grams, leaving many tokens' contexts unscored (low `*_support`, more `NaN`); `min_frequency=1` keeps the full table but, for the all-words 4-grams (~237M rows), needs tens of GB of RAM to build. The new default of `5` retains far more coverage than `100` (≈3.7M vs ≈47K all-word 4-grams) while remaining buildable on a laptop. **Metric values and support counts change for anyone who relied on the previous default**; pass `min_frequency=100` explicitly to reproduce pre-0.7 results. The threshold still controls only which n-grams are available — no smoothing or backoff is applied.
+- **`TokenEntropisalCalculator.calculate_batch` is now vectorized.** Instead of re-joining each document against the lookup tables, it assembles the whole corpus into a single per-position table and joins each lookup once. Results are identical to the previous per-document path up to floating-point summation order (max abs difference ≈ 1e-14, with identical `NaN` patterns and `*_support` counts). On multi-thousand-document corpora this is dramatically faster — the per-position metric computation over the CLEAR corpus (4,724 excerpts) dropped from hours to a few seconds.
+- **Build-time intermediates are released after construction.** Once the lookup tables are built, `__init__` clears `_token_transitions` and sets `ngram_df` to `None` (neither is read by any query method), lowering the calculator's resident memory footprint. Note: `calc.ngram_df` is no longer available after construction — code that inspected it should filter the source frame directly instead. This lowers steady-state memory but does not change the peak reached while the lookups are being built.
+
 ## [0.6.0] - 2026-06-05
 
 ### Removed

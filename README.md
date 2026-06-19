@@ -103,8 +103,8 @@ from entroprisal.utils import load_4grams
 # Load reference n-gram data
 ngrams = load_4grams("aw")  # "aw" = all words, "cw" = content words
 
-# Initialize calculator
-calc = TokenEntropisalCalculator(ngrams, min_frequency=100)
+# Initialize calculator (min_frequency defaults to 5 -- see below)
+calc = TokenEntropisalCalculator(ngrams, min_frequency=5)
 
 # Calculate metrics for a list of tokens
 tokens = ["the", "quick", "brown", "fox"]
@@ -118,6 +118,23 @@ print(metrics)
 # - entropy_difference_2, entropy_difference_3
 # - Support counts for each metric
 ```
+
+#### Choosing `min_frequency`
+
+`min_frequency` is the most important knob on `TokenEntropisalCalculator`. It filters the
+reference n-gram table up front: only n-grams attested **at least this many times** in the
+reference corpus are kept, and every metric is computed from what survives. It trades
+context **coverage** against **build cost** (time and memory):
+
+| `min_frequency` | All-word 4-grams kept | Coverage | Build cost |
+|---|---|---|---|
+| `1` (no filtering) | ~237M | maximum | very high — needs tons of GB of RAM |
+| `5` (**default**) | ~3.7M | high | laptop-friendly |
+| `100` | ~47K | low (many `NaN`, small `*_support`) | smallest / fastest |
+
+Lower thresholds keep the long tail of rarer contexts, so more of your tokens get a
+non-`NaN` score (higher `*_support`); higher thresholds are cheaper but leave more
+positions unscored.
 
 ### Per-Position Token Metrics
 
