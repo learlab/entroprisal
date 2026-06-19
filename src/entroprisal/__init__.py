@@ -16,7 +16,7 @@ Example usage:
 
     >>> # Token-level entropy and surprisal
     >>> ngrams = load_4grams("aw")
-    >>> token_calc = TokenEntropisalCalculator(ngrams, min_frequency=100)
+    >>> token_calc = TokenEntropisalCalculator(ngrams, min_frequency=5)
     >>> metrics = token_calc.calculate_metrics(tokens)  # per-document aggregate means
 
     >>> # Per-position surprisal, entropy reduction, and entropy difference
@@ -28,7 +28,7 @@ Example usage:
     >>> metrics = char_calc.calculate_metrics(tokens)
 """
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 from .character_entroprisal import CharacterEntropisalCalculator
 from .rest_of_word_entroprisal import RestOfWordEntropisalCalculator

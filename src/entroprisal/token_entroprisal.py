@@ -23,20 +23,24 @@ class TokenEntropisalCalculator:
     - Entropy: Uncertainty about the next token given context
 
     Attributes:
-        min_frequency: Minimum frequency threshold for n-grams
+        min_frequency: Minimum reference-corpus count for an n-gram to be kept (default 5).
     """
 
     def __init__(
         self,
         ngram_frequencies: Union[pl.LazyFrame, pl.DataFrame, Path, str],
-        min_frequency: int = 100,
+        min_frequency: int = 5,
     ):
         """Initialize the calculator with n-gram frequency data.
 
         Args:
             ngram_frequencies: LazyFrame, DataFrame, or path to parquet file containing
                 columns: token_0, token_1, token_2, token_3, count
-            min_frequency: Minimum frequency threshold to include n-grams (default: 100)
+            min_frequency: Minimum count an n-gram must reach in the reference corpus to be
+                kept (default: 5). This trades context coverage against build cost: higher
+                values (e.g. 100) build faster and use less memory but leave more contexts
+                unscored, while lower values keep more coverage at the cost of memory.
+                The threshold only controls which n-grams are available.
         """
         self.min_frequency = min_frequency
 
