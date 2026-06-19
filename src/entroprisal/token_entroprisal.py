@@ -49,12 +49,21 @@ class TokenEntropisalCalculator:
         # Pre-collect filtered data
         self.ngram_df = ngram_frequencies.filter(pl.col("count") >= self.min_frequency).collect()
 
-        # Pre-compute transition matrices once
+        # Pre-compute the lookup tables the query methods rely on, then release the large
+        # build-time intermediates. Only _surprisal_lookup / _entropy_lookup /
+        # _gap_entropy_lookup and token_marginal_entropy are read after construction, so
+        # dropping the full filtered table (ngram_df) and the per-order transition matrices
+        # keeps the resident footprint far smaller -- important at low min_frequency, where
+        # ngram_df can hold hundreds of millions of rows.
         self._build_all_token_transitions()
         self._build_surprisal_lookup()
         self._build_entropy_lookup()
+        # _token_transitions is consumed only by the surprisal/entropy builds above.
+        self._token_transitions = {}
         self._build_gap_entropy_lookups()
         self._build_marginal_entropy()
+        # ngram_df is consumed only by the transition/gap/marginal builds above.
+        self.ngram_df = None
 
     def _build_all_token_transitions(self):
         """Pre-compute all token transition matrices."""
